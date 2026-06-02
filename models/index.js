@@ -53,19 +53,30 @@ const OrderSchema = new Schema({
 
 /* ── Task (delivery / pickup) ── */
 const TaskSchema = new Schema({
-  order:    String,
-  orderId:  { type: Schema.Types.ObjectId, ref: 'Order' },
-  customer: String,
-  phone:    String,
-  address:  String,
-  lat:      Number,
-  lon:      Number,
-  driver:   String,
-  type:     { type: String, enum: ['delivery','pickup'], default: 'delivery' },
-  status:   { type: String, enum: ['yangi','jarayonda','yetkazildi','bekor'], default: 'yangi' },
-  time:     String,
-  date:     String,
-  deletedAt:Date,
+  order:      String,
+  orderId:    { type: Schema.Types.ObjectId, ref: 'Order' },
+  customer:   String,
+  phone:      String,
+  address:    String,
+  lat:        Number,
+  lon:        Number,
+  driver:     String,
+  driverId:   { type: Schema.Types.ObjectId, ref: 'Driver' },
+  type:       { type: String, enum: ['delivery','pickup'], default: 'delivery' },
+  status:     { type: String, enum: ['yangi','jarayonda','yetkazildi','bekor'], default: 'yangi' },
+  time:       String,
+  date:       String,
+  // Payment
+  totalPrice: { type: Number, default: 0 },
+  amountDue:  { type: Number, default: 0 },
+  amountPaid: { type: Number, default: 0 },
+  payMethod:  { type: String, enum: ['naqt','karta','transfer','qarz',''], default: '' },
+  paid:       { type: Boolean, default: false },
+  // Driver earn
+  driverEarn: { type: Number, default: 0 },
+  // Auto-created
+  auto:       { type: Boolean, default: false },
+  deletedAt:  Date,
 }, { timestamps: true })
 
 /* ── Employee ── */
@@ -92,6 +103,7 @@ const DriverSchema = new Schema({
   plate:     String,
   status:    { type: String, enum: ['faol','band','dam'], default: 'faol' },
   trips:     { type: Number, default: 0 },
+  balance:   { type: Number, default: 0 },
   deletedAt: Date,
 }, { timestamps: true })
 
