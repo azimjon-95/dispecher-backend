@@ -2,6 +2,12 @@ require('dotenv').config()
 const express   = require('express')
 const mongoose  = require('mongoose')
 const cors      = require('cors')
+const auth      = require('./middleware/auth')
+const xssClean  = require('xss-clean')
+const {
+  helmetConfig, globalLimiter, mongoSanitizeConfig,
+  sanitizeBody, extraHeaders, securityLog, ipGuard
+} = require('./middleware/security')
 const morgan    = require('morgan')
 const http      = require('http')
 const { Server } = require('socket.io')
@@ -15,7 +21,27 @@ const io     = new Server(server, {
 })
 
 // ── Middleware ──
-app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:3000', credentials: true }))
+// ── CORS ──
+const allowedOrigins = (process.env.CLIENT_URL || 'http://localhost:3000').split(',').map(o=>o.trim())
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin || allowedOrigins.includes(origin)) return cb(null, true)
+    cb(new Error('CORS: ruxsat berilmagan manba'))
+  },
+  credentials: true,
+  methods: ['GET','POST','PUT','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization'],
+}))
+
+// ── SECURITY MIDDLEWARE ──
+app.use(helmetConfig)           // HTTP security headers
+app.use(extraHeaders)           // Qo'shimcha headerlar
+app.use(globalLimiter)          // Rate limiting
+app.use(mongoSanitizeConfig)    // NoSQL injection himoya
+app.use(xssClean())             // XSS himoya
+app.use(sanitizeBody)           // Input sanitization
+app.use(securityLog)            // Shubhali so'rovlar log
+app.use(ipGuard)                // IP blacklist
 app.use(express.json())
 app.use(morgan('dev'))
 
@@ -66,15 +92,15 @@ setTimeout(() => {
 
 // ── Routes ──
 app.use('/api/auth',        R.authR)
-app.use('/api/orders',      R.ordersR)
+app.use('/api/orders',      auth, R.ordersR)
 app.use('/api/order-items', R.orderItemsR)
 app.use('/api/prices',      R.pricesR)
 app.use('/api/delivery',    R.deliveryR)
 app.use('/api/pickup',      R.pickupR)
-app.use('/api/employees',   R.employeesR)
+app.use('/api/employees',   auth, R.employeesR)
 app.use('/api/drivers',     R.driversR)
 app.use('/api/customers',   R.customersR)
-app.use('/api/finance',     R.financeR)
+app.use('/api/finance',     auth, R.financeR)
 app.use('/api/salary',      R.salaryR)
 app.use('/api/settings',    R.settingsR)
 app.use('/api/archive',     R.archiveR)
