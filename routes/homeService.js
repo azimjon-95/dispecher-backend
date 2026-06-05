@@ -1,5 +1,7 @@
 'use strict'
 const router = require('express').Router()
+const cache = require('../redis/cache')
+const { cacheGet, invalidateCache, invalidatePrefix } = require('../redis/cacheMiddleware')
 const { HomeService, Employee, Finance, SalaryPayment } = require('../models')
 
 /* auto-number */
@@ -20,7 +22,7 @@ router.get('/', async (req,res) => {
 })
 
 /* POST */
-router.post('/', async (req,res) => {
+router.post('/', invalidateCache(['home-service', 'dashboard', 'finance']), async (req,res) => {
   try {
     const number = await nextNumber()
     const svc    = await HomeService.create({ ...req.body, number })
@@ -29,7 +31,7 @@ router.post('/', async (req,res) => {
 })
 
 /* PUT */
-router.put('/:id', async (req,res) => {
+router.put('/:id', invalidateCache(['home-service', 'dashboard', 'finance']), async (req,res) => {
   try {
     const svc = await HomeService.findByIdAndUpdate(req.params.id, { $set:req.body }, { new:true })
     res.json(svc)
@@ -37,7 +39,7 @@ router.put('/:id', async (req,res) => {
 })
 
 /* DELETE */
-router.delete('/:id', async (req,res) => {
+router.delete('/:id', invalidateCache(['home-service', 'dashboard', 'finance']), async (req,res) => {
   try {
     await HomeService.findByIdAndUpdate(req.params.id, { deletedAt:new Date() })
     res.json({ ok:true })

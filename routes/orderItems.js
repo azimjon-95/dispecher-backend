@@ -1,5 +1,7 @@
 'use strict'
 const router       = require('express').Router()
+const cache = require('../redis/cache')
+const { cacheGet, invalidateCache, invalidatePrefix } = require('../redis/cacheMiddleware')
 const { OrderItem, Order, Employee, Finance, Task } = require('../models')
 
 /* ── Stage map ── */
@@ -86,7 +88,7 @@ async function syncOrderStats(orderId) {
 }
 
 /* ─── GET /api/order-items?orderId=xxx ─── */
-router.get('/', async (req, res) => {
+router.get('/', cacheGet(), async (req, res) => {
   try {
     const q = { deletedAt: { $exists: false } }
     if (req.query.orderId) q.orderId = req.query.orderId

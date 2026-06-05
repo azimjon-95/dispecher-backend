@@ -1,5 +1,7 @@
 'use strict'
 const router = require('express').Router()
+const cache = require('../redis/cache')
+const { cacheGet, invalidateCache, invalidatePrefix } = require('../redis/cacheMiddleware')
 const { Attendance, Employee } = require('../models')
 
 /* GET /api/attendance?date=2026-06-01 */
@@ -17,7 +19,7 @@ router.get('/', async (req,res) => {
 })
 
 /* POST /api/attendance — qo'lda yoki bot orqali */
-router.post('/', async (req,res) => {
+router.post('/', invalidateCache(['attendance', 'dashboard']), async (req,res) => {
   try {
     const { employeeId, date, checkIn, status, tgChatId, note } = req.body
     if (!employeeId || !date) return res.status(400).json({ error:'employeeId va date kerak' })

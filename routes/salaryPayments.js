@@ -1,5 +1,7 @@
 'use strict'
 const router = require('express').Router()
+const cache = require('../redis/cache')
+const { cacheGet, invalidateCache, invalidatePrefix } = require('../redis/cacheMiddleware')
 const { SalaryPayment, Employee } = require('../models')
 
 /* GET */
@@ -15,7 +17,7 @@ router.get('/', async (req,res) => {
 })
 
 /* POST — avans, oylik, jarima, bonus */
-router.post('/', async (req,res) => {
+router.post('/', invalidateCache(['salary-payments', 'salary', 'dashboard']), async (req,res) => {
   try {
     const { employeeId, type, amount, note, date } = req.body
     if (!employeeId || !amount) return res.status(400).json({ error:'employeeId va amount kerak' })

@@ -5,6 +5,20 @@ const {
   Employee, Driver, Customer,
   Finance, Salary, Settings,
 } = require('../models')
+const cache = require('../redis/cache')
+const { cacheGet, invalidateCache, invalidatePrefix } = require('../redis/cacheMiddleware')
+
+/* ── Cache-aware CRUD builder ── */
+function buildCached(Model, fields, prefix, ttl) {
+  const c = ctrl(Model, fields)
+  const r = router()
+  r.get('/',       cacheGet(ttl), c.getAll)
+  r.get('/:id',    cacheGet(ttl*2), c.getOne)
+  r.post('/',      invalidateCache([prefix,'dashboard']), c.create)
+  r.put('/:id',    invalidateCache([prefix,'dashboard']), c.update)
+  r.delete('/:id', invalidateCache([prefix,'dashboard']), c.remove)
+  return r
+}
 
 function build(Model, fields) {
   const c = ctrl(Model, fields)
@@ -16,13 +30,14 @@ function build(Model, fields) {
   r.delete('/:id', c.remove)
   return r
 }
+// NOTE: use buildCached() for new routes
 
 /* Orders with auto-number */
 const ordersR = router()
 const oc = ctrl(Order, ['customer','phone','address','number'])
-ordersR.get('/',    oc.getAll)
-ordersR.get('/:id', oc.getOne)
-ordersR.post('/', async (req, res) => {
+ordersR.get('/',    cacheGet(30), oc.getAll)
+ordersR.get('/:id', cacheGet(60), oc.getOne)
+ordersR.post('/', invalidateCache(['orders','dashboard']), async (req, res) => {
   try {
     const count  = await Order.countDocuments()
     const number = '#' + String(1000 + count + 1)
@@ -30,13 +45,13 @@ ordersR.post('/', async (req, res) => {
     res.status(201).json(doc)
   } catch(e) { res.status(400).json({ error: e.message }) }
 })
-ordersR.put('/:id',    oc.update)
-ordersR.delete('/:id', oc.remove)
+ordersR.put('/:id',    invalidateCache(['orders','delivery','pickup','dashboard']), oc.update)
+ordersR.delete('/:id', invalidateCache(['orders','dashboard']), oc.remove)
 
 /* Delivery */
 const deliveryR = router()
 const tc = ctrl(Task, ['order','customer','address'])
-deliveryR.get('/', async (req,res) => { req.query.type='delivery'; return tc.getAll(req,res) })
+deliveryR.get('/', cacheGet(20), async (req,res) => { req.query.type='delivery'; return tc.getAll(req,res) })
 deliveryR.get('/:id', tc.getOne)
 deliveryR.post('/', async (req,res) => { req.body.type='delivery'; return tc.create(req,res) })
 deliveryR.put('/:id', tc.update)
@@ -44,19 +59,19 @@ deliveryR.delete('/:id', tc.remove)
 
 /* Pickup */
 const pickupR = router()
-pickupR.get('/', async (req,res) => { req.query.type='pickup'; return tc.getAll(req,res) })
+pickupR.get('/', cacheGet(20), async (req,res) => { req.query.type='pickup'; return tc.getAll(req,res) })
 pickupR.get('/:id', tc.getOne)
 pickupR.post('/', async (req,res) => { req.body.type='pickup'; return tc.create(req,res) })
 pickupR.put('/:id', tc.update)
 pickupR.delete('/:id', tc.remove)
 
 /* Simple CRUD */
-const employeesR = build(Employee,   ['name','phone'])
-const driversR   = build(Driver,     ['name','phone','plate'])
+const employeesR = buildCached(Employee, ['name','phone'], 'employees', 120)
+const driversR   = buildCached(Driver, ['name','phone','plate'], 'drivers', 60)
 const customersR = build(Customer,   ['name','phone','address'])
-const financeR   = build(Finance,    ['description','category'])
-const salaryR    = build(Salary,     ['employee'])
-const settingsR  = build(Settings,   ['key'])
+const financeR   = buildCached(Finance, ['description','category'], 'finance', 30)
+const salaryR    = buildCached(Salary, ['employee'], 'salary', 120)
+const settingsR  = buildCached(Settings, ['key'], 'settings', 300)
 
 /* Archive */
 const archiveR = router()
@@ -77,7 +92,10 @@ dashR.get('/stats', async (req, res) => {
     const cache = require('../redis/cache')
     const cacheKey = 'dashboard:stats'
     const cached = await cache.get(cacheKey)
-    if (cached) return res.json({ ...cached, fromCache: true })
+    if (cached) {
+      res.set('X-Cache', 'HIT')
+      return res.json({ ...cached, fromCache: true })
+    }
 
     const [totalOrders, activeOrders, totalCustomers, activeDrivers] = await Promise.all([
       Order.countDocuments({ deletedAt:{ $exists:false } }),

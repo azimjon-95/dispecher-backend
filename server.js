@@ -47,7 +47,15 @@ app.set('io', io)  // routes ichida ishlatish uchun
 
 // ── MongoDB ──
 mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/dispecher')
-  .then(() => console.log('✅ MongoDB connected'))
+  .then(async () => {
+    console.log('✅ MongoDB connected')
+    // Cache warmup
+    try {
+      const { warmup } = require('./redis/cacheMiddleware')
+      const models = require('./models')
+      await warmup(models)
+    } catch(e) { console.warn('Cache warmup:', e.message) }
+  })
   .catch(e => console.error('❌ MongoDB:', e.message))
 
 // ── Redis status ──
