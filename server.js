@@ -74,6 +74,9 @@ app.use('/api/dashboard',   R.dashR)
 app.use('/api/driver',           R.driverLiveR)
 app.use('/api/telegram-settings', R.telegramSettingsR)
 app.use('/api/sms-settings',      R.smsSettingsR)
+app.use('/api/home-service',      R.homeServiceR)
+app.use('/api/attendance',        R.attendanceR)
+app.use('/api/salary-payments',   R.salaryPaymentsR)
 app.use('/api/bot',         R.botR)
 
 // ── Health ──

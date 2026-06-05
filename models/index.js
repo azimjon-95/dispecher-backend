@@ -164,6 +164,48 @@ const SettingsSchema = new Schema({
 }, { timestamps: true })
 
 /* ── AuditLog ── */
+
+/* ── Attendance (Davomat) ── */
+const AttendanceSchema = new Schema({
+  employeeId:  { type: Schema.Types.ObjectId, ref: 'Employee', required: true },
+  employeeName:String,
+  date:        { type: String, required: true },  // YYYY-MM-DD
+  checkIn:     String,   // HH:mm
+  checkOut:    String,
+  status:      { type: String, enum: ['keldi','kelmadi','yarim'], default:'keldi' },
+  tgChatId:    String,
+  note:        String,
+}, { timestamps: true })
+
+/* ── SalaryPayment (Avans/Oylik/Jarima) ── */
+const SalaryPaymentSchema = new Schema({
+  employeeId:   { type: Schema.Types.ObjectId, ref: 'Employee' },
+  employeeName: String,
+  type:         { type: String, enum: ['avans','oylik','jarima','bonus'], default:'oylik' },
+  amount:       { type: Number, required: true },
+  note:         String,
+  date:         { type: String, default: () => new Date().toISOString().slice(0,10) },
+  paidBy:       String,
+}, { timestamps: true })
+
+/* ── HomeService (Uyga borib xizmat) ── */
+const HomeServiceSchema = new Schema({
+  number:       String,
+  customer:     String,
+  phone:        String,
+  address:      String,
+  lat:          Number,
+  lon:          Number,
+  scheduledDate:String,
+  scheduledTime:String,
+  workers:      [{ workerId: Schema.Types.ObjectId, workerName: String, percent: Number }],
+  workerPercent:{ type: Number, default: 10 },  // % per worker total
+  status:       { type: String, enum: ['rejalashtirilgan','jarayonda','bajarildi','bekor'], default:'rejalashtirilgan' },
+  description:  String,
+  totalAmount:  { type: Number, default: 0 },
+  paidAmount:   { type: Number, default: 0 },
+  deletedAt:    Date,
+}, { timestamps: true })
 const AuditLogSchema = new Schema({
   action:   String,
   resource: String,
@@ -181,6 +223,9 @@ module.exports = {
   Finance:   model('Finance',   FinanceSchema),
   Salary:    model('Salary',    SalarySchema),
   Price:     model('Price',     PriceSchema),
-  Settings:  model('Settings',  SettingsSchema),
+  Settings:    model('Settings',    SettingsSchema),
+  Attendance:  model('Attendance',  AttendanceSchema),
+  SalaryPayment: model('SalaryPayment', SalaryPaymentSchema),
+  HomeService: model('HomeService', HomeServiceSchema),
   AuditLog:  model('AuditLog',  AuditLogSchema),
 }

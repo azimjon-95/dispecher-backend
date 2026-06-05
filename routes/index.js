@@ -102,6 +102,9 @@ const driverLiveR = require('./driverLive')
 
 const telegramSettingsR = require('./telegramSettings')
 const smsSettingsR      = require('./smsSettings')
+const homeServiceR     = require('./homeService')
+const attendanceR      = require('./attendance')
+const salaryPaymentsR  = require('./salaryPayments')
 
 module.exports = {
   authR:       require('./auth'),
@@ -122,4 +125,7 @@ module.exports = {
   driverLiveR,
   telegramSettingsR,
   smsSettingsR,
+  homeServiceR,
+  attendanceR,
+  salaryPaymentsR,
 }
