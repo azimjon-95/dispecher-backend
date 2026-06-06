@@ -40,23 +40,35 @@ const helmetConfig = helmet({
 
 // Global: barcha API uchun
 const globalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 daqiqa
-  max:      500,              // 500 ta so'rov
-  message:  { error: "Juda ko'p so'rov. 15 daqiqadan keyin urinib ko'ring." },
+  windowMs:        15 * 60 * 1000,
+  max:             500,
+  message:         { error: "Juda ko'p so'rov. 15 daqiqadan keyin urinib ko'ring." },
   standardHeaders: true,
   legacyHeaders:   false,
-  skip: (req) => req.path === '/health',
+  skip:            (req) => req.path === '/health',
+  keyGenerator:    (req) => {
+    const forwarded = req.headers['x-forwarded-for']
+    const ip = forwarded ? forwarded.split(',')[0].trim() : (req.socket?.remoteAddress || 'unknown')
+    return ip.replace(/[^a-zA-Z0-9._-]/g, '_')
+  },
 })
 
 // Auth: login uchun qattiq cheklash
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 daqiqa
-  max:      10,               // faqat 10 ta urinish
-  message:  { error: "Juda ko'p noto'g'ri urinish. 15 daqiqadan keyin urinib ko'ring." },
+  windowMs:               15 * 60 * 1000,
+  max:                    10,
+  message:                { error: "Juda ko'p noto'g'ri urinish. 15 daqiqadan keyin urinib ko'ring." },
   skipSuccessfulRequests: true,
+  standardHeaders:        true,
+  legacyHeaders:          false,
+  keyGenerator: (req) => {
+    const forwarded = req.headers['x-forwarded-for']
+    const ip = forwarded ? forwarded.split(',')[0].trim() : (req.socket?.remoteAddress || 'unknown')
+    return ip.replace(/[^a-zA-Z0-9._-]/g, '_')
+  },
   handler: (req, res) => {
-    console.warn(`🚨 BRUTE FORCE urinish: ${req.ip} → ${req.path}`)
-    res.status(429).json({ error: "Juda ko'p urinish. IP bloklandi." })
+    console.warn('🚨 BRUTE FORCE urinish: ' + req.path)
+    res.status(429).json({ error: "Juda ko'p urinish. Keyinroq urinib ko'ring." })
   },
 })
 
@@ -69,16 +81,17 @@ const botLimiter = rateLimit({
 
 // Driver live location
 const driverLimiter = rateLimit({
-  windowMs: 10 * 1000,  // 10 sekund
-  max:      3,           // 3 ta so'rov (har 10 sekund)
+  windowMs: 10 * 1000,
+  max:      3,
   message:  { error: 'Location yuborish limiti.' },
   keyGenerator: (req) => {
     const id = req.body?.telegramId
-    if (id) return String(id)
-    // IPv6-safe IP extraction
-    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown'
-    return ip.replace(/[^a-zA-Z0-9:.]/g, '_')
+    if (id) return 'drv_' + String(id)
+    const forwarded = req.headers['x-forwarded-for']
+    const ip = forwarded ? forwarded.split(',')[0].trim() : (req.socket?.remoteAddress || 'unknown')
+    return ip.replace(/[^a-zA-Z0-9._-]/g, '_')
   },
+  skip: (req) => !req.body?.telegramId,
 })
 
 /* ── 3. MONGO SANITIZE — NoSQL Injection ── */
