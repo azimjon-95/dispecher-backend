@@ -54,8 +54,18 @@ async function syncOrderStats(orderId) {
     const allDone = items.every(i => i.stage === 'tugallandi')
     const newStatus = allDone ? 'tugallandi' : (stageToOrder[dominant] || 'qabul_qilindi')
 
+    // Build item summary "2 ta Gilam, 1 ta Ko'rpa"
+    const typeCounts = {}
+    items.forEach(i => {
+      const name = i.name || i.itemType || 'Mahsulot'
+      typeCounts[name] = (typeCounts[name] || 0) + 1
+    })
+    const itemSummary = Object.entries(typeCounts)
+      .map(([n,cnt]) => `${cnt} ta ${n}`)
+      .join(', ')
+
     await Order.findByIdAndUpdate(orderId, {
-      $set: { total, itemCount, status: newStatus }
+      $set: { total, itemCount, status: newStatus, itemSummary }
     })
 
     // If bezak done → auto create delivery task

@@ -40,6 +40,7 @@ const OrderSchema = new Schema({
   lon:         Number,
   description: String,
   itemCount:   { type: Number, default: 0 },
+  itemSummary: { type: String, default: '' },
   total:       { type: Number, default: 0 },
   status: {
     type: String,
