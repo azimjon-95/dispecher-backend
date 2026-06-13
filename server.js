@@ -115,6 +115,18 @@ app.use('/api/bot',         R.botR)
 
 // ── Health ──
 app.head('/health', (_, res) => res.sendStatus(200))
+
+// Driver live locations (from bot GPS)
+app.get('/api/driver/live-locations', async (req, res) => {
+  try {
+    const { getAllLiveLocations } = require('./bot/index')
+    const locs = await getAllLiveLocations()
+    res.json(locs)
+  } catch(e) {
+    // Fallback: return empty if bot not running
+    res.json([])
+  }
+})
 app.get('/health', (_, res) => res.json({
   status: 'ok',
   time:   new Date().toISOString(),

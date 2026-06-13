@@ -1,135 +1,189 @@
 // =============================================
-//  DISPECHER BOT
-//  Shafyor va ishchilar uchun Telegram Bot
-//  Ishlatish: node bot/index.js
+//  TARTIB CRM BOT v3
+//  PIN code ro'yxatdan o'tish
+//  Kategoriya: Ishchi | Shafyor | Elektrik | Boshqa
+//  GPS live location (shafyor)
+//  Davomat (ishchi)
+//  Buyurtma qabul (shafyor)
 // =============================================
 require('dotenv').config({ path: require('path').join(__dirname, '../.env') })
 const TelegramBot = require('node-telegram-bot-api')
 const mongoose    = require('mongoose')
-const cache       = require('../redis/cache')
 
-// ── Connect DB ──
-mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/dispecher')
-  .then(() => console.log('✅ Bot: MongoDB connected'))
-  .catch(e => console.error('❌ Bot MongoDB:', e.message))
+mongoose.connect(process.env.MONGO_URI)
+  .then(() => console.log('✅ Bot: MongoDB ulandi'))
+  .catch(e => console.error('❌ Bot DB:', e.message))
 
-const {
-  Driver, Employee, Task, OrderItem, Order, Finance
-} = require('../models')
+const { Driver, Employee, Order, OrderItem, Task, Finance } = require('../models')
 
-// ── Init bot ──
 const TOKEN = process.env.BOT_TOKEN
-if (!TOKEN) { console.error('❌ BOT_TOKEN .env da yo\'q!'); process.exit(1) }
+if (!TOKEN) { console.error('❌ BOT_TOKEN yo\'q!'); process.exit(1) }
 
 const bot = new TelegramBot(TOKEN, { polling: true })
-console.log('🤖 Bot ishga tushdi...')
+console.log('🤖 Tartib CRM Bot ishga tushdi...')
 
-// ── Currency format ──
-const fc = n => (n || 0).toLocaleString('ru-RU') + " so'm"
+// ── Helpers ──
+const fc  = n => (n||0).toLocaleString('ru-RU') + " so'm"
+const now = () => new Date().toLocaleTimeString('uz-UZ',{hour:'2-digit',minute:'2-digit'})
+const today = () => new Date().toISOString().slice(0,10)
 
-// ── Map link ──
-function mapLink(lat, lon, addr) {
-  if (lat && lon) return `https://yandex.com/maps/?ll=${lon},${lat}&z=16&pt=${lon},${lat},pm2rdm&l=map`
-  return `https://yandex.com/maps/?text=${encodeURIComponent(addr||'')}`
+// ── PIN sessions ── (chatId → state)
+const sessions = {}
+
+// ── Role labels ──
+const ROLES = {
+  driver:   { label:'🚗 Shafyor',   emoji:'🚗' },
+  worker:   { label:'👷 Ishchi',    emoji:'👷' },
+  electric: { label:'⚡ Elektrik',  emoji:'⚡' },
+  cleaning: { label:'🧹 Tozalovchi',emoji:'🧹' },
+  other:    { label:'👤 Boshqa',    emoji:'👤' },
 }
 
-// ── Live location map (shafyor o'z joyidan mijozga) ──
-function routeLink(driverLat, driverLon, destLat, destLon, destAddr) {
-  if (driverLat && driverLon && destLat && destLon) {
-    return `https://yandex.com/maps/?rtext=${driverLat},${driverLon}~${destLat},${destLon}&rtt=auto`
-  }
-  if (destLat && destLon) {
-    return `https://yandex.com/maps/?ll=${destLon},${destLat}&z=16&pt=${destLon},${destLat},pm2rdm`
-  }
-  return `https://yandex.com/maps/?text=${encodeURIComponent(destAddr||'')}`
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//   FIND USER by chatId
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function findUser(chatId) {
+  const cid = String(chatId)
+  const driver = await Driver.findOne({ tgChatId: cid })
+  if (driver) return { type: 'driver', doc: driver }
+  const worker = await Employee.findOne({ tgChatId: cid })
+  if (worker) return { type: 'worker', doc: worker }
+  return null
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//   /START — ROL ANIQLASH
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-bot.onText(/\/start/, async (msg) => {
-  const chatId = msg.chat.id
-  const text   = msg.text || ''
-  // deep link: /start driver_PHONE yoki /start worker_PHONE
-  const parts  = text.split(' ')
-  const param  = parts[1] || ''
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//   /start
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+bot.onText(/\/start/, async msg => {
+  const chatId = String(msg.chat.id)
+  const user   = await findUser(chatId)
 
-  // Save chatId to DB
-  if (param.startsWith('driver_')) {
-    const phone = '+' + param.replace('driver_', '')
-    const drv = await Driver.findOneAndUpdate({ phone }, { tgChatId: String(chatId) }, { new: true })
-    if (drv) {
-      await cache.set(`driver_chat:${drv._id}`, chatId, 86400 * 30)
-      return bot.sendMessage(chatId,
-        `✅ *Xush kelibsiz, ${drv.name}!*\n\nSiz shafyor sifatida ro'yxatdan o'tdingiz.\nTopshiriqlar shu yerga keladi.`,
-        { parse_mode: 'Markdown' }
-      )
-    }
+  if (user) {
+    return sendMainMenu(chatId, user)
   }
 
-  if (param.startsWith('worker_')) {
-    const phone = '+' + param.replace('worker_', '')
-    const emp = await Employee.findOneAndUpdate({ phone }, { tgChatId: String(chatId) }, { new: true })
-    if (emp) {
-      await cache.set(`worker_chat:${emp._id}`, chatId, 86400 * 30)
-      return bot.sendMessage(chatId,
-        `✅ *Xush kelibsiz, ${emp.name}!*\n\nSiz ishchi sifatida ro'yxatdan o'tdingiz.\nTopshiriqlar shu yerga keladi.`,
-        { parse_mode: 'Markdown' }
-      )
-    }
-  }
-
-  // Default start
+  // Not registered → ask PIN
+  sessions[chatId] = { step: 'pin' }
   bot.sendMessage(chatId,
-    `👋 *Dispecher Bot*\n\nBu bot shafyor va ishchilar uchun.\nAdmin tomonidan havola berilishi kerak.`,
-    { parse_mode: 'Markdown' }
-  )
-})
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//   /menu — SHAFYOR MENYU
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-bot.onText(/\/menu/, async (msg) => {
-  const chatId  = String(msg.chat.id)
-  const driver  = await Driver.findOne({ tgChatId: chatId })
-  const worker  = await Employee.findOne({ tgChatId: chatId })
-
-  if (driver) return sendDriverMenu(chatId, driver)
-  if (worker) return sendWorkerMenu(chatId, worker)
-
-  bot.sendMessage(msg.chat.id, '⚠️ Siz ro\'yxatdan o\'tmagansiz.')
-})
-
-async function sendDriverMenu(chatId, driver) {
-  const active = await Task.countDocuments({ driver: driver.name, status: 'jarayonda', deletedAt: { $exists: false } })
-  bot.sendMessage(chatId,
-    `🚗 *${driver.name}*\n\nHolat: ${driver.status === 'faol' ? '🟢 Faol' : '🟡 ' + driver.status}\nFaol topshiriqlar: *${active} ta*`,
+    `👋 *Xush kelibsiz — Tartib CRM*\n\n` +
+    `Tizimga kirish uchun *4 xonali PIN kodingizni* yuboring.\n\n` +
+    `📌 PIN kodni admindan oling.`,
     {
       parse_mode: 'Markdown',
-      reply_markup: {
-        keyboard: [
-          [{ text: '📋 Mening topshiriqlarim' }, { text: '📊 Mening statistikam' }],
-          [{ text: '✅ Faol holatni yangilaish' }],
-        ],
-        resize_keyboard: true,
-      }
+      reply_markup: { remove_keyboard: true }
     }
   )
+})
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//   MESSAGE HANDLER
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+bot.on('message', async msg => {
+  const chatId  = String(msg.chat.id)
+  const text    = (msg.text || '').trim()
+  const sess    = sessions[chatId] || {}
+
+  // Ignore commands (handled separately)
+  if (text.startsWith('/')) return
+
+  // ── Live location from driver ──
+  if (msg.location) {
+    return handleLiveLocation(chatId, msg.location)
+  }
+
+  // ── PIN step ──
+  if (sess.step === 'pin') {
+    return handlePin(chatId, text, msg)
+  }
+
+  // ── Registered user ──
+  const user = await findUser(chatId)
+  if (!user) {
+    sessions[chatId] = { step: 'pin' }
+    return bot.sendMessage(chatId, '⚠️ PIN kodingizni kiriting:')
+  }
+
+  // Route by role and text
+  if (user.type === 'driver') return handleDriverMsg(chatId, text, user.doc, msg)
+  if (user.type === 'worker') return handleWorkerMsg(chatId, text, user.doc, msg)
+})
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//   PIN HANDLER
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function handlePin(chatId, text, msg) {
+  const sess = sessions[chatId] || {}
+
+  // Step 1: verify PIN
+  if (sess.step === 'pin') {
+    // Find employee or driver with this PIN
+    const emp = await Employee.findOne({ pin: text })
+    const drv = await Driver.findOne({ pin: text })
+    const found = emp || drv
+
+    if (!found) {
+      return bot.sendMessage(chatId,
+        `❌ *Noto'g'ri PIN kod!*\n\nQayta urinib ko'ring yoki admindan yangi PIN oling.`,
+        { parse_mode: 'Markdown' }
+      )
+    }
+
+    // Already has chatId?
+    if (found.tgChatId && found.tgChatId !== chatId) {
+      return bot.sendMessage(chatId,
+        `⚠️ Bu PIN allaqachon boshqa qurilmada ishlatilgan.\nAdmin bilan bog'laning.`
+      )
+    }
+
+    // Link chatId
+    found.tgChatId = chatId
+    await found.save()
+
+    const type = emp ? 'worker' : 'driver'
+    const user = { type, doc: found }
+
+    delete sessions[chatId]
+
+    await bot.sendMessage(chatId,
+      `✅ *Xush kelibsiz, ${found.name}!*\n\n` +
+      `${type === 'driver' ? '🚗 Shafyor' : '👷 Ishchi'} sifatida ro'yxatdan o'tdingiz.\n\n` +
+      `Quyidagi menyudan foydalaning:`,
+      { parse_mode: 'Markdown' }
+    )
+
+    return sendMainMenu(chatId, user)
+  }
 }
 
-async function sendWorkerMenu(chatId, worker) {
-  const active = await OrderItem.countDocuments({
-    'assignments.workerId': worker._id,
-    'assignments.doneAt': null,
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//   MAIN MENU
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function sendMainMenu(chatId, user) {
+  if (user.type === 'driver') return sendDriverMenu(chatId, user.doc)
+  if (user.type === 'worker') return sendWorkerMenu(chatId, user.doc)
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//   DRIVER MENU
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function sendDriverMenu(chatId, driver) {
+  const tasks = await Task.countDocuments({
+    driver: driver.name, status: 'jarayonda',
     deletedAt: { $exists: false }
   })
+
   bot.sendMessage(chatId,
-    `👷 *${worker.name}*\n\nBo'lim: ${worker.section}\nFaol topshiriqlar: *${active} ta*`,
+    `🚗 *${driver.name}*\n\n` +
+    `Holat: ${driver.status === 'faol' ? '🟢 Faol' : '🟡 ' + (driver.status||'')}\n` +
+    `Faol topshiriqlar: *${tasks} ta*\n` +
+    `Vaqt: ${now()}`,
     {
       parse_mode: 'Markdown',
       reply_markup: {
         keyboard: [
-          [{ text: '📋 Mening topshiriqlarim' }, { text: '💰 Balansim' }],
+          [{ text: '📋 Topshiriqlarim' }, { text: '📍 Lokatsiyam' }],
+          [{ text: '✅ Topshirildi' }, { text: '📊 Statistika' }],
+          [{ text: '📡 Live GPS yoqish', request_location: true }],
         ],
         resize_keyboard: true,
       }
@@ -137,368 +191,450 @@ async function sendWorkerMenu(chatId, worker) {
   )
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//   INLINE CALLBACK HANDLER
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-bot.on('callback_query', async (query) => {
-  const chatId = String(query.message.chat.id)
-  const msgId  = query.message.message_id
-  const data   = query.data || ''
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//   WORKER MENU
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function sendWorkerMenu(chatId, worker) {
+  const todayAtt = await Employee.findById(worker._id)
+    .select('attendance').lean()
+  const att = todayAtt?.attendance?.find?.(a => a.date === today())
+  const isCheckedIn = att && att.checkIn && !att.checkOut
 
+  bot.sendMessage(chatId,
+    `👷 *${worker.name}*\n\n` +
+    `Bo'lim: ${worker.section || '—'}\n` +
+    `Balans: *${fc(worker.balance)}*\n` +
+    `Bugun: ${att?.checkIn ? `✅ Kirdi ${att.checkIn}` : '❌ Kirmadi'}\n` +
+    `Vaqt: ${now()}`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        keyboard: [
+          [
+            { text: isCheckedIn ? '🚪 Ishdan chiqish' : '✅ Ishga kirdim' },
+            { text: '📋 Topshiriqlarim' }
+          ],
+          [{ text: '💰 Balansim' }, { text: '📊 Oylik hisobot' }],
+        ],
+        resize_keyboard: true,
+      }
+    }
+  )
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//   DRIVER MESSAGE HANDLER
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function handleDriverMsg(chatId, text, driver, msg) {
+  switch (text) {
+
+    case '📋 Topshiriqlarim': {
+      const tasks = await Task.find({
+        driver: driver.name,
+        deletedAt: { $exists: false },
+        status: { $in: ['jarayonda','yangi'] }
+      }).sort({ createdAt: -1 }).limit(10).lean()
+
+      if (!tasks.length) {
+        return bot.sendMessage(chatId, '📭 Hozircha topshiriq yo\'q.')
+      }
+
+      for (const t of tasks) {
+        const statusEmoji = t.type==='delivery' ? '📦' : '📮'
+        const mapUrl = t.lat && t.lon
+          ? `https://maps.google.com/?q=${t.lat},${t.lon}`
+          : `https://yandex.com/maps/?text=${encodeURIComponent(t.address||'')}`
+
+        await bot.sendMessage(chatId,
+          `${statusEmoji} *${t.order || t.orderNumber}*\n` +
+          `👤 ${t.customer}\n` +
+          `📍 ${t.address || '—'}\n` +
+          `📞 ${t.phone || '—'}\n` +
+          `Holat: ${t.status}`,
+          {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: [[
+                { text: '🗺️ Xarita', url: mapUrl },
+                { text: '✅ Yetkazildi', callback_data: `driver_done:${t._id}` },
+              ]]
+            }
+          }
+        )
+      }
+      break
+    }
+
+    case '📍 Lokatsiyam': {
+      bot.sendMessage(chatId,
+        '📡 *GPS lokatsiyangizni yuboring:*\n\n' +
+        'Pastdagi tugmani bosing yoki menyudan "📡 Live GPS" tanlang.',
+        {
+          parse_mode: 'Markdown',
+          reply_markup: {
+            keyboard: [
+              [{ text: '📍 Lokatsiyamni yuborish', request_location: true }],
+              [{ text: '🔙 Menyu' }],
+            ],
+            resize_keyboard: true,
+          }
+        }
+      )
+      break
+    }
+
+    case '✅ Topshirildi': {
+      const tasks = await Task.find({
+        driver: driver.name, status: 'jarayonda',
+        deletedAt: { $exists: false }
+      }).limit(5).lean()
+
+      if (!tasks.length) return bot.sendMessage(chatId, 'Faol topshiriq yo\'q.')
+
+      const buttons = tasks.map(t => ([{
+        text: `${t.order||'?'} — ${t.customer||''}`,
+        callback_data: `driver_done:${t._id}`
+      }]))
+
+      bot.sendMessage(chatId, '✅ Qaysi topshiriq yakunlandi?',
+        { reply_markup: { inline_keyboard: buttons } }
+      )
+      break
+    }
+
+    case '📊 Statistika': {
+      const done  = await Task.countDocuments({ driver: driver.name, status: 'yetkazildi', deletedAt: { $exists: false } })
+      const month = await Task.countDocuments({
+        driver: driver.name, status: 'yetkazildi',
+        createdAt: { $gte: new Date(new Date().setDate(1)) },
+        deletedAt: { $exists: false }
+      })
+      bot.sendMessage(chatId,
+        `📊 *${driver.name} — Statistika*\n\n` +
+        `✅ Jami: ${done} ta\n` +
+        `📅 Bu oy: ${month} ta`,
+        { parse_mode: 'Markdown' }
+      )
+      break
+    }
+
+    case '🔙 Menyu':
+      return sendDriverMenu(chatId, driver)
+
+    default:
+      return sendDriverMenu(chatId, driver)
+  }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//   WORKER MESSAGE HANDLER
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function handleWorkerMsg(chatId, text, worker, msg) {
+  switch (text) {
+
+    case '✅ Ishga kirdim': {
+      const emp   = await Employee.findById(worker._id)
+      const todayStr = today()
+      let att = emp.attendance || []
+      const existing = att.find(a => a.date === todayStr)
+
+      if (existing?.checkIn) {
+        return bot.sendMessage(chatId,
+          `✅ Siz bugun allaqachon kirdingiz: *${existing.checkIn}*`,
+          { parse_mode: 'Markdown' }
+        )
+      }
+
+      if (!existing) {
+        att.push({ date: todayStr, checkIn: now(), checkOut: null })
+      } else {
+        existing.checkIn = now()
+      }
+      emp.attendance = att
+      await emp.save()
+
+      bot.sendMessage(chatId,
+        `✅ *Ishga kirdingiz!*\n\nVaqt: *${now()}*\nXayrli ish kuni! 💪`,
+        { parse_mode: 'Markdown' }
+      )
+      return sendWorkerMenu(chatId, emp)
+    }
+
+    case '🚪 Ishdan chiqish': {
+      const emp    = await Employee.findById(worker._id)
+      const todayStr = today()
+      const att    = emp.attendance || []
+      const existing = att.find(a => a.date === todayStr)
+
+      if (!existing?.checkIn) {
+        return bot.sendMessage(chatId, '⚠️ Bugun kirish qayd etilmagan.')
+      }
+      if (existing.checkOut) {
+        return bot.sendMessage(chatId,
+          `ℹ️ Siz allaqachon chiqdingiz: *${existing.checkOut}*`,
+          { parse_mode: 'Markdown' }
+        )
+      }
+
+      existing.checkOut = now()
+      emp.attendance = att
+      await emp.save()
+
+      bot.sendMessage(chatId,
+        `🚪 *Ishdan chiqdingiz!*\n\nKirish: *${existing.checkIn}*\nChiqish: *${existing.checkOut}*\n\nXayrli dam oling! 👋`,
+        { parse_mode: 'Markdown' }
+      )
+      return sendWorkerMenu(chatId, emp)
+    }
+
+    case '📋 Topshiriqlarim': {
+      const items = await OrderItem.find({
+        'assignments.workerId': worker._id.toString(),
+        deletedAt: { $exists: false },
+        stage: { $nin: ['tugallandi'] }
+      }).limit(10).lean()
+
+      if (!items.length) {
+        return bot.sendMessage(chatId,
+          '📭 Hozircha faol topshiriq yo\'q.\n\nYangi topshiriq kelganda xabar beriladi.'
+        )
+      }
+
+      for (const item of items) {
+        const myAss = item.assignments?.find?.(a =>
+          String(a.workerId) === String(worker._id) && !a.doneAt
+        )
+        if (!myAss) continue
+
+        await bot.sendMessage(chatId,
+          `📋 *${item.name}*\n` +
+          `📦 Buyurtma: ${item.orderNumber || '—'}\n` +
+          `📍 Bosqich: ${item.stage}\n` +
+          `${item.unit==='sqm' ? `📐 ${item.sqm} kv.m` : `🔢 ${item.qty} dona`}\n` +
+          `💰 To'lov: ${fc(item.pricePerUnit)}/${item.unit==='sqm'?'kv.m':'dona'}`,
+          {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: [[
+                { text: '✅ Bosqich tugallandi', callback_data: `worker_done:${item._id}` }
+              ]]
+            }
+          }
+        )
+      }
+      break
+    }
+
+    case '💰 Balansim': {
+      const emp = await Employee.findById(worker._id).lean()
+      bot.sendMessage(chatId,
+        `💰 *${emp.name} — Balans*\n\n` +
+        `Joriy balans: *${fc(emp.balance)}*\n` +
+        `Berilgan avans: *${fc(emp.advancePaid)}*\n` +
+        `Bo'lim: ${emp.section || '—'}`,
+        { parse_mode: 'Markdown' }
+      )
+      break
+    }
+
+    case '📊 Oylik hisobot': {
+      const emp   = await Employee.findById(worker._id).lean()
+      const start = new Date(new Date().setDate(1))
+      const doneItems = await OrderItem.find({
+        'assignments': {
+          $elemMatch: {
+            workerId: worker._id.toString(),
+            doneAt: { $gte: start }
+          }
+        }
+      }).lean()
+
+      const earned = doneItems.reduce((s,i) => {
+        const a = i.assignments?.find?.(a => String(a.workerId)===String(worker._id)&&a.doneAt)
+        return s + (a?.earned || 0)
+      }, 0)
+
+      const todayAtt = emp.attendance?.filter?.(a => {
+        const d = new Date(a.date)
+        return d >= start && a.checkIn
+      }).length || 0
+
+      bot.sendMessage(chatId,
+        `📊 *Bu oy — ${new Date().toLocaleString('uz-UZ',{month:'long'})}*\n\n` +
+        `✅ Ish kunlari: *${todayAtt} kun*\n` +
+        `💰 Hisoblangan: *${fc(earned)}*\n` +
+        `💳 Joriy balans: *${fc(emp.balance)}*`,
+        { parse_mode: 'Markdown' }
+      )
+      break
+    }
+
+    default:
+      return sendWorkerMenu(chatId, worker)
+  }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//   LIVE LOCATION (GPS)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function handleLiveLocation(chatId, location) {
+  const driver = await Driver.findOne({ tgChatId: chatId })
+  if (!driver) return
+
+  const data = {
+    telegramId: chatId,
+    driverId:   String(driver._id),
+    name:       driver.name,
+    latitude:   location.latitude,
+    longitude:  location.longitude,
+    speed:      location.speed || 0,
+    accuracy:   location.horizontal_accuracy || 0,
+    ts:         Date.now(),
+    online:     true,
+  }
+
+  // Save to cache (Redis or memory)
+  try {
+    const cache = require('../redis/cache')
+    await cache.set(`driver_loc:${chatId}`, JSON.stringify(data), 300)
+    await cache.set(`driver_loc_all:${chatId}`, JSON.stringify(data), 300)
+  } catch {}
+
+  // Save to DB
+  try {
+    await Driver.findByIdAndUpdate(driver._id, {
+      lastLocation: { lat: location.latitude, lon: location.longitude, ts: new Date() }
+    })
+  } catch {}
+
+  // Emit to WebSocket if available
+  try {
+    const io = global.__io
+    if (io) io.emit('driver:live-location', data)
+  } catch {}
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//   CALLBACK QUERY
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+bot.on('callback_query', async query => {
+  const chatId = String(query.message.chat.id)
+  const data   = query.data || ''
   await bot.answerCallbackQuery(query.id)
 
   const [action, id] = data.split(':')
 
-  // ── PICKUP ACCEPT ──
-  if (action === 'pickup_accept') {
+  // ── Driver: task done ──
+  if (action === 'driver_done') {
     const task = await Task.findById(id)
-    if (!task) return bot.editMessageText('❌ Topshiriq topilmadi', { chat_id: chatId, message_id: msgId })
+    if (!task) return bot.sendMessage(chatId, '⚠️ Topshiriq topilmadi.')
 
-    await Task.findByIdAndUpdate(id, { status: 'jarayonda' })
+    task.status = 'yetkazildi'
+    task.doneAt = new Date()
+    await task.save()
 
-    const mapUrl = routeLink(null, null, task.lat, task.lon, task.address)
-    const items  = await OrderItem.find({ orderId: task.orderId, deletedAt: { $exists: false } })
-    const itemsList = items.map((it, i) =>
-      `  ${i+1}. 🏷️\`${it._id.toString().slice(-6).toUpperCase()}\` ${it.name} — ${it.unit==='sqm' ? it.sqm+'m²' : it.qty+' dona'}`
-    ).join('\n')
-
-    await bot.editMessageText(
-      `✅ *Qabul qilindi!*\n\n📋 Topshiriq: \`${task.order}\`\n👤 ${task.customer}\n📞 ${task.phone}\n📍 ${task.address}\n\n📦 *Olib kelish:*\n${itemsList}\n\n🗺️ [Xaritada ko'rish](${mapUrl})`,
-      {
-        chat_id: chatId, message_id: msgId,
-        parse_mode: 'Markdown',
-        reply_markup: {
-          inline_keyboard: [[
-            { text: '📦 Mijozdan qabul qildim', callback_data: `pickup_got:${id}` }
-          ]]
-        }
-      }
-    )
-    // Admin ga xabar
-    await notifyAdmin(`🟡 Shafyor pickup qabul qildi\nTopshiriq: ${task.order}\nShafyor: ${task.driver}`)
-  }
-
-  // ── PICKUP REJECT ──
-  if (action === 'pickup_reject') {
-    await Task.findByIdAndUpdate(id, { status: 'bekor', driver: '' })
-    await bot.editMessageText('❌ Topshiriq bekor qilindi. Admin xabardor qilindi.', { chat_id: chatId, message_id: msgId })
-    const task = await Task.findById(id)
-    await notifyAdmin(`🔴 Shafyor pickup rad etdi\nTopshiriq: ${task?.order}\nShafyor: ${task?.driver}`)
-  }
-
-  // ── PICKUP GOT (Mijozdan qabul qilib oldi) ──
-  if (action === 'pickup_got') {
-    const task = await Task.findById(id)
-    if (!task) return
-
-    await bot.editMessageText(
-      `✅ *Mijozdan qabul qilindi!*\n\n📋 ${task.order}\n👤 ${task.customer}\n\nEndi seksga olib keling.`,
-      {
-        chat_id: chatId, message_id: msgId,
-        parse_mode: 'Markdown',
-        reply_markup: {
-          inline_keyboard: [[
-            { text: '🏭 Seksga olib keldim!', callback_data: `pickup_delivered:${id}` }
-          ]]
-        }
-      }
-    )
-    await notifyAdmin(`📦 Shafyor mijozdan mahsulot oldi\nTopshiriq: ${task.order}`)
-  }
-
-  // ── PICKUP DELIVERED (Seksga olib keldi) ──
-  if (action === 'pickup_delivered') {
-    const task = await Task.findById(id)
-    if (!task) return
-
-    await Task.findByIdAndUpdate(id, { status: 'yetkazildi' })
-    if (task.orderId) await Order.findByIdAndUpdate(task.orderId, { status: 'qabul_qilindi' })
-
-    await bot.editMessageText(
-      `🎉 *Topshiriq yakunlandi!*\n\n📋 ${task.order} seksga topshirildi.\n✅ Admin ko'rmoqda.`,
-      { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown' }
-    )
-    await notifyAdmin(`✅ Shafyor seksga olib keldi\nBuyurtma: ${task.order}\nEndi ishchilar ishlaydi`)
-  }
-
-  // ── DELIVERY ACCEPT ──
-  if (action === 'delivery_accept') {
-    const task = await Task.findById(id)
-    if (!task) return bot.editMessageText('❌ Topilmadi', { chat_id: chatId, message_id: msgId })
-
-    await Task.findByIdAndUpdate(id, { status: 'jarayonda' })
-    const mapUrl = routeLink(null, null, task.lat, task.lon, task.address)
-
-    // Items with codes
-    const items = await OrderItem.find({ orderId: task.orderId, deletedAt: { $exists: false } })
-    const itemsList = items.map((it, i) =>
-      `  ${i+1}. 🏷️\`${it._id.toString().slice(-6).toUpperCase()}\` ${it.name}`
-    ).join('\n')
-
-    await bot.editMessageText(
-      `✅ *Qabul qilindi — Yetkazib berish!*\n\n📋 Buyurtma: \`${task.order}\`\n👤 *${task.customer}*\n📞 ${task.phone}\n📍 ${task.address}\n\n📦 *Mahsulotlar:*\n${itemsList}\n\n💰 To'lov: *${fc(task.totalPrice)}*\n${task.paid ? '✅ To\'langan' : `⚠️ Yig'ib oling: *${fc(task.amountDue)}*`}\n\n🗺️ [Yo'l xaritada](${mapUrl})`,
-      {
-        chat_id: chatId, message_id: msgId,
-        parse_mode: 'Markdown',
-        reply_markup: {
-          inline_keyboard: [[
-            { text: '✅ Topshirdim, pul oldim', callback_data: `delivery_done_cash:${id}` },
-            { text: '💳 Topshirdim (karta)', callback_data: `delivery_done_card:${id}` },
-          ], [
-            { text: '⚠️ Mijoz uyda yo\'q', callback_data: `delivery_nobody:${id}` }
-          ]]
-        }
-      }
-    )
-    await notifyAdmin(`🟡 Shafyor delivery qabul qildi\nTopshiriq: ${task.order}`)
-  }
-
-  // ── DELIVERY REJECT ──
-  if (action === 'delivery_reject') {
-    await Task.findByIdAndUpdate(id, { status: 'yangi', driver: '' })
-    await bot.editMessageText('❌ Rad etildi. Admin topshiriqni qayta belgilaydi.', { chat_id: chatId, message_id: msgId })
-    const task = await Task.findById(id)
-    await notifyAdmin(`🔴 Shafyor delivery rad etdi\nBuyurtma: ${task?.order}`)
-  }
-
-  // ── DELIVERY DONE CASH ──
-  if (action === 'delivery_done_cash') {
-    await handleDeliveryDone(id, chatId, msgId, 'naqt')
-  }
-
-  // ── DELIVERY DONE CARD ──
-  if (action === 'delivery_done_card') {
-    await handleDeliveryDone(id, chatId, msgId, 'karta')
-  }
-
-  // ── DELIVERY NOBODY ──
-  if (action === 'delivery_nobody') {
-    const task = await Task.findById(id)
-    await Task.findByIdAndUpdate(id, { status: 'yangi' })
-    await bot.editMessageText(
-      `⚠️ Admin xabardor qilindi.\nMijoz uyda yo'q — ${task?.order}`,
-      { chat_id: chatId, message_id: msgId }
-    )
-    await notifyAdmin(`⚠️ Shafyor yetdi lekin mijoz uyda yo'q\nBuyurtma: ${task?.order}\nMijoz: ${task?.customer} ${task?.phone}`)
-  }
-
-  // ── ITEM DONE (ishchi bajardi) ──
-  if (action === 'item_done') {
-    const item = await OrderItem.findById(id)
-    if (!item) return bot.editMessageText('❌ Topilmadi', { chat_id: chatId, message_id: msgId })
-
-    const NEXT = { yuvish:'quritish', quritish:'bezak', bezak:'yetkazish', yetkazish:'tugallandi' }
-    const nextStage = NEXT[item.stage]
-
-    // Mark done
-    const cur = item.assignments?.find(a => a.stage === item.stage && !a.doneAt)
-    if (cur) cur.doneAt = new Date()
-    if (nextStage) item.stage = nextStage
-
-    // Worker balance
-    if (cur?.workerId) {
-      const earn = item.unit === 'sqm'
-        ? Math.round((item.sqm || 0) * 1500)
-        : Math.round((item.qty || 1) * 2000)
-      await Employee.findByIdAndUpdate(cur.workerId, { $inc: { balance: earn } })
-    }
-
-    await item.save()
-
-    const STAGE_LABEL = {
-      yuvish:'🫧 Yuvish', quritish:'💨 Quritish', bezak:'✨ Bezak',
-      yetkazish:'🚚 Yetkazish', tugallandi:'✅ Tugallandi'
-    }
-    const nextLabel = STAGE_LABEL[nextStage] || 'Tugallandi'
-
-    await bot.editMessageText(
-      `✅ *Bajarildi!*\n\n${item.name}\n📋 Buyurtma: \`${item.orderNumber}\`\n\n➡️ Keyingi bosqich: *${nextLabel}*`,
-      { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown' }
-    )
-    await notifyAdmin(`✅ Ishchi bajardi: ${item.name} → ${nextLabel}\nBuyurtma: ${item.orderNumber}`)
-  }
-})
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//   DELIVERY DONE HANDLER
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-async function handleDeliveryDone(taskId, chatId, msgId, payMethod) {
-  const task = await Task.findById(taskId)
-  if (!task) return
-
-  await Task.findByIdAndUpdate(taskId, { status: 'yetkazildi', payMethod })
-
-  if (task.orderId) {
-    await Order.findByIdAndUpdate(task.orderId, { status: 'tugallandi' })
-
-    // Finance: kirim qo'shish (agar naqt)
-    if (payMethod === 'naqt' && task.amountDue > 0) {
-      await Finance.create({
-        type:        'kirim',
-        description: `Buyurtma ${task.order} — naqt to'lov (shafyor)`,
-        amount:      task.amountDue,
-        category:    'Buyurtma',
-        orderId:     task.orderId,
-        by:          task.driver,
-        date:        new Date().toISOString().slice(0, 10),
+    // Update order status
+    if (task.orderId) {
+      await Order.findByIdAndUpdate(task.orderId, {
+        status: task.type === 'delivery' ? 'tugallandi' : 'yetkazishda'
       })
     }
-  }
 
-  await bot.editMessageText(
-    `🎉 *Topshiriq yakunlandi!*\n\n📋 ${task.order}\n👤 ${task.customer}\n💰 To'lov: ${payMethod === 'naqt' ? '💵 Naqt' : '💳 Karta'}\nSumma: ${fc(task.amountDue || task.totalPrice)}\n\n✅ Kassaga topshiring!`,
-    { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown',
-      reply_markup: {
-        inline_keyboard: [[
-          { text: '💵 Kassaga topshirdim', callback_data: `cash_submitted:${taskId}` }
-        ]]
-      }
-    }
-  )
-}
+    bot.editMessageReplyMarkup({ inline_keyboard:[] }, {
+      chat_id: chatId, message_id: query.message.message_id
+    }).catch(()=>{})
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//   CASH SUBMITTED
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-bot.on('callback_query', async (query) => {
-  const chatId = String(query.message.chat.id)
-  const msgId  = query.message.message_id
-  const data   = query.data || ''
-
-  if (data.startsWith('cash_submitted:')) {
-    const id   = data.split(':')[1]
-    const task = await Task.findById(id)
-    await bot.editMessageText(
-      `✅ *Pul kassaga topshirildi!*\n\nRahmat, ${task?.driver || 'shafyor'}!`,
-      { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown' }
+    bot.sendMessage(chatId,
+      `✅ *Topshiriq yakunlandi!*\n\n📦 ${task.order || ''}\n👤 ${task.customer || ''}\nVaqt: ${now()}`,
+      { parse_mode: 'Markdown' }
     )
-    await notifyAdmin(`💵 Shafyor kassaga pul topshirdi\nBuyurtma: ${task?.order}\nSumma: ${fc(task?.amountDue)}`)
+  }
+
+  // ── Worker: item advance ──
+  if (action === 'worker_done') {
+    const item = await OrderItem.findById(id)
+    if (!item) return bot.sendMessage(chatId, '⚠️ Topshiriq topilmadi.')
+
+    const worker  = await Employee.findOne({ tgChatId: chatId })
+    if (!worker) return
+
+    const NEXT = {
+      qabul:'yuvish', yuvish:'quritish', quritish:'bezak',
+      bezak:'yetkazish', yetkazish:'tugallandi'
+    }
+    const EARN = { yuvish:1500, quritish:800, bezak:1000 }
+
+    const myAss = item.assignments?.find?.(
+      a => String(a.workerId)===String(worker._id) && !a.doneAt
+    )
+    if (myAss) {
+      myAss.doneAt = new Date()
+      myAss.earned = EARN[item.stage]
+        ? Math.round((item.sqm||item.qty||1) * EARN[item.stage])
+        : 0
+    }
+
+    const nextStage = NEXT[item.stage] || 'tugallandi'
+    item.stage = nextStage
+
+    // Worker balance
+    if (myAss?.earned > 0) {
+      await Employee.findByIdAndUpdate(worker._id, {
+        $inc: { balance: myAss.earned }
+      })
+    }
+    await item.save()
+
+    bot.editMessageReplyMarkup({ inline_keyboard:[] }, {
+      chat_id: chatId, message_id: query.message.message_id
+    }).catch(()=>{})
+
+    bot.sendMessage(chatId,
+      `✅ *${item.name}* — ${item.stage} bosqichga o'tdi!\n` +
+      (myAss?.earned > 0 ? `💰 Balansingizga *${fc(myAss.earned)}* qo'shildi!` : ''),
+      { parse_mode: 'Markdown' }
+    )
   }
 })
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//   TEXT MESSAGES
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-bot.on('message', async (msg) => {
-  if (msg.text?.startsWith('/')) return
-
-  const chatId = String(msg.chat.id)
-  const text   = msg.text || ''
-
-  const driver = await Driver.findOne({ tgChatId: chatId })
-  const worker = await Employee.findOne({ tgChatId: chatId })
-
-  // ── Mening topshiriqlarim ──
-  if (text === '📋 Mening topshiriqlarim') {
-    if (driver) return await sendDriverTasks(chatId, driver)
-    if (worker) return await sendWorkerTasks(chatId, worker)
-  }
-
-  // ── Statistika ──
-  if (text === '📊 Mening statistikam' && driver) {
-    return await sendDriverStats(chatId, driver)
-  }
-
-  // ── Balans ──
-  if (text === '💰 Balansim' && worker) {
-    return await sendWorkerBalance(chatId, worker)
-  }
-})
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//   DRIVER TASKS
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-async function sendDriverTasks(chatId, driver) {
-  const tasks = await Task.find({
-    driver: driver.name,
-    status: { $in: ['yangi', 'jarayonda'] },
-    deletedAt: { $exists: false }
-  }).sort({ createdAt: -1 }).limit(10)
-
-  if (!tasks.length) {
-    return bot.sendMessage(chatId, '📭 Hozircha faol topshiriq yo\'q.')
-  }
-
-  const list = tasks.map(t => {
-    const icon = t.type === 'pickup' ? '📮' : '🚚'
-    return `${icon} \`${t.order}\` — ${t.customer} (${t.status})`
-  }).join('\n')
-
-  bot.sendMessage(chatId, `📋 *Faol topshiriqlaringiz:*\n\n${list}`, { parse_mode: 'Markdown' })
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//   DRIVER STATISTICS
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-async function sendDriverStats(chatId, driver) {
-  const [totalTrips, thisMonth, totalEarned] = await Promise.all([
-    Task.countDocuments({ driver: driver.name, status: 'yetkazildi' }),
-    Task.countDocuments({
-      driver: driver.name, status: 'yetkazildi',
-      createdAt: { $gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1) }
-    }),
-    Finance.aggregate([
-      { $match: { by: driver.name, type: 'kirim' } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ])
-  ])
-
-  const earned = totalEarned[0]?.total || 0
-
-  bot.sendMessage(chatId,
-    `📊 *Sizning statistikangiz*\n\n🚗 Jami yetkazishlar: *${totalTrips} ta*\n📅 Bu oy: *${thisMonth} ta*\n💰 Yig'ilgan: *${fc(earned)}*\n\n✅ Davom eting!`,
-    { parse_mode: 'Markdown' }
-  )
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//   WORKER TASKS
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-async function sendWorkerTasks(chatId, worker) {
-  const items = await OrderItem.find({
-    'assignments': { $elemMatch: { workerId: worker._id, doneAt: null } },
-    deletedAt: { $exists: false }
-  }).sort({ createdAt: -1 }).limit(10)
-
-  if (!items.length) {
-    return bot.sendMessage(chatId, '📭 Hozircha faol topshiriq yo\'q.')
-  }
-
-  const list = items.map(i => {
-    const ICON = { yuvish:'🫧', quritish:'💨', bezak:'✨' }
-    return `${ICON[i.stage]||'📦'} \`${i.orderNumber}\` — ${i.name} (${i.stage})`
-  }).join('\n')
-
-  bot.sendMessage(chatId, `📋 *Faol topshiriqlaringiz:*\n\n${list}`, { parse_mode: 'Markdown' })
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//   WORKER BALANCE
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-async function sendWorkerBalance(chatId, worker) {
-  const fresh = await Employee.findById(worker._id)
-  const done  = await OrderItem.countDocuments({
-    'assignments': { $elemMatch: { workerId: worker._id, doneAt: { $ne: null } } }
-  })
-
-  bot.sendMessage(chatId,
-    `💰 *Sizning balansingiz*\n\n✅ Bajarilgan mahsulotlar: *${done} ta*\n💵 To'plangan balans: *${fc(fresh?.balance || 0)}*\n📅 Bazaviy oylik: *${fc(fresh?.salary || 0)}*\n\n💡 Oylik hisob-kitobda balansingiz qo'shiladi.`,
-    { parse_mode: 'Markdown' }
-  )
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//   ADMIN NOTIFY
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-async function notifyAdmin(text) {
-  const adminChatId = process.env.ADMIN_CHAT_ID
-  if (!adminChatId) return
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//   EXPORT: notify functions for routes
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function notifyDriver(driverName, message, inlineButtons) {
   try {
-    await bot.sendMessage(adminChatId, `🔔 *Admin xabarnomasi*\n\n${text}`, { parse_mode: 'Markdown' })
-  } catch (e) {}
+    const driver = await Driver.findOne({ name: driverName, tgChatId: { $exists: true, $ne: '' } })
+    if (!driver?.tgChatId) return false
+    await bot.sendMessage(driver.tgChatId, message, {
+      parse_mode: 'Markdown',
+      ...(inlineButtons ? { reply_markup: { inline_keyboard: inlineButtons } } : {})
+    })
+    return true
+  } catch(e) { console.error('notifyDriver:', e.message); return false }
 }
 
-// ── Error handling ──
-bot.on('polling_error', e => console.error('Bot polling error:', e.message))
+async function notifyWorker(workerId, message, inlineButtons) {
+  try {
+    const worker = await Employee.findById(workerId)
+    if (!worker?.tgChatId) return false
+    await bot.sendMessage(worker.tgChatId, message, {
+      parse_mode: 'Markdown',
+      ...(inlineButtons ? { reply_markup: { inline_keyboard: inlineButtons } } : {})
+    })
+    return true
+  } catch(e) { console.error('notifyWorker:', e.message); return false }
+}
 
-console.log('🤖 Bot polling ishlamoqda...')
+// Live locations API endpoint
+async function getAllLiveLocations() {
+  try {
+    const cache = require('../redis/cache')
+    const keys  = await cache.keys('driver_loc:*')
+    if (!keys?.length) return []
+    const locs  = await Promise.all(keys.map(k => cache.get(k)))
+    return locs.filter(Boolean).map(l => {
+      try { return JSON.parse(l) } catch { return null }
+    }).filter(Boolean)
+  } catch { return [] }
+}
+
+module.exports = { bot, notifyDriver, notifyWorker, getAllLiveLocations }
