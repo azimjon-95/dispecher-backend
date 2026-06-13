@@ -46,6 +46,8 @@ app.use(express.json())
 app.use(morgan('dev'))
 
 // ── Socket.IO ──
+global.__io = io  // accessible from routes
+
 io.on('connection', (socket) => {
   console.log('🔌 Client connected:', socket.id)
 

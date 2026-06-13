@@ -45,7 +45,13 @@ ordersR.post('/', invalidateCache(['orders','dashboard']), async (req, res) => {
     res.status(201).json(doc)
   } catch(e) { res.status(400).json({ error: e.message }) }
 })
-ordersR.put('/:id',    invalidateCache(['orders','delivery','pickup','dashboard']), oc.update)
+ordersR.put('/:id', invalidateCache(['orders','delivery','pickup','dashboard']), async (req,res,next) => {
+  const orig = oc.update
+  res.on('finish', () => {
+    if (res.statusCode < 300 && global.__io) global.__io.to('admin').emit('data:update', { type:'orders' })
+  })
+  return orig(req,res,next)
+})
 ordersR.delete('/:id', invalidateCache(['orders','dashboard']), oc.remove)
 
 /* Delivery */
