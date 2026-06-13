@@ -114,6 +114,7 @@ app.use('/api/salary-payments',   R.salaryPaymentsR)
 app.use('/api/bot',         R.botR)
 
 // ── Health ──
+app.head('/health', (_, res) => res.sendStatus(200))
 app.get('/health', (_, res) => res.json({
   status: 'ok',
   time:   new Date().toISOString(),
