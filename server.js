@@ -75,6 +75,28 @@ app.set('io', io)  // routes ichida ishlatish uchun
 
 // ── MongoDB ──
 mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/dispecher')
+
+/* ── Startup: .env dan Settings DB ga sync ── */
+mongoose.connection.once('open', async () => {
+  try {
+    const { Settings } = require('./models')
+    const tgKeys = ['BOT_TOKEN','BOT_USERNAME','ADMIN_CHAT_ID','WEBAPP_URL']
+    
+    for (const key of tgKeys) {
+      if (!process.env[key]) continue
+      // Faqat DB da bo'lmasa yozing (DB ustunlik qiladi)
+      const exists = await Settings.findOne({ key })
+      if (!exists || !exists.value) {
+        await Settings.findOneAndUpdate(
+          { key },
+          { $set: { key, value: process.env[key] } },
+          { upsert: true }
+        )
+        console.log(`✅ .env → DB: ${key} saqlandi`)
+      }
+    }
+  } catch(e) { console.error('Settings sync error:', e.message) }
+})
   .then(async () => {
     console.log('✅ MongoDB connected')
     // Cache warmup

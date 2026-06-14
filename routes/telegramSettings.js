@@ -17,9 +17,10 @@ router.get('/', async (req, res) => {
     const result = {}
     TG_KEYS.forEach(k => {
       const row = rows.find(r => r.key === k)
-      // DB da bo'lsa DB, yo'qsa .env dan
       result[k] = row?.value || process.env[k] || ''
     })
+    // Bot ishlayaptimi?
+    result._botActive = !!(result.BOT_TOKEN)
 
     await cache.set(CACHE_K, result, 300)
     res.json(result)
