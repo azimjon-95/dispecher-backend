@@ -111,12 +111,27 @@ const DriverSchema = new Schema({
 /* ── Customer ── */
 const CustomerSchema = new Schema({
   name:       { type: String, required: true },
-  phone:      { type: String, required: true },
+  phone:      { type: String, required: true, unique: true },
   address:    String,
   discount:   { type: Number, default: 0 },
   totalSpent: { type: Number, default: 0 },
   orders:     { type: Number, default: 0 },
   status:     { type: String, enum: ['active','inactive'], default: 'active' },
+  // Geo location — bir marta olinsa qayta so'ralmasin
+  lat:        Number,
+  lon:        Number,
+  locationSaved: { type: Boolean, default: false },
+  // Buyurtmalar tarixi
+  orderHistory: [{
+    orderId:  { type: Schema.Types.ObjectId, ref: 'Order' },
+    number:   String,
+    total:    Number,
+    status:   String,
+    date:     String,
+  }],
+  // Oxirgi buyurtma sanasi
+  lastOrderDate: Date,
+  note: String,
   deletedAt:  Date,
 }, { timestamps: true })
 
