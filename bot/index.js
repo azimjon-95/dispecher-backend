@@ -500,12 +500,8 @@ async function handleLiveLocation(chatId, location) {
     await cache.set(`driver_loc_all:${chatId}`, JSON.stringify(data), 300)
   } catch {}
 
-  // Save to DB
-  try {
-    await Driver.findByIdAndUpdate(driver._id, {
-      lastLocation: { lat: location.latitude, lon: location.longitude, ts: new Date() }
-    })
-  } catch {}
+  // GPS faqat Redis da saqlanadi — DB ga yozilmaydi (tezlik uchun)
+  // Driver.lastLocation DB ga saqlanmaydi, faqat cache orqali olinadi
 
   // Emit to WebSocket if available
   try {

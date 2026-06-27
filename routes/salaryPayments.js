@@ -5,7 +5,7 @@ const { cacheGet, invalidateCache, invalidatePrefix } = require('../redis/cacheM
 const { SalaryPayment, Employee } = require('../models')
 
 /* GET */
-router.get('/', async (req,res) => {
+router.get('/', cacheGet(60), async (req,res) => {
   try {
     const q = {}
     if (req.query.employeeId) q.employeeId = req.query.employeeId

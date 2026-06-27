@@ -79,6 +79,13 @@ mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/dispecher')
 /* ── Startup: .env dan Settings DB ga sync ── */
 mongoose.connection.once('open', async () => {
   try {
+    // Cache warmup — tez-tez so'raladigan datalarni Redis ga yuklash
+    const { warmup } = require('./redis/cacheMiddleware')
+    const models = require('./models')
+    warmup(models).catch(() => {})
+  } catch {}
+
+  try {
     const { Settings } = require('./models')
     const tgKeys = ['BOT_TOKEN','BOT_USERNAME','ADMIN_CHAT_ID','WEBAPP_URL']
     
@@ -140,14 +147,25 @@ app.use('/api/bot',         R.botR)
 // ── Health ──
 app.head('/health', (_, res) => res.sendStatus(200))
 
-// Driver live locations (from bot GPS)
+// Driver live locations — faqat Redis dan o'qiladi (DB ga murojaat yo'q)
 app.get('/api/driver/live-locations', async (req, res) => {
   try {
-    const { getAllLiveLocations } = require('./bot/index')
-    const locs = await getAllLiveLocations()
+    const keys = await cache.keys('driver_loc:*')
+    if (!keys.length) return res.json([])
+    const locs = []
+    for (const key of keys) {
+      try {
+        const raw = await cache.get(key)
+        if (!raw) continue
+        const loc = typeof raw === 'string' ? JSON.parse(raw) : raw
+        // Faqat 5 daqiqadan yangi locationlarni qaytaramiz
+        if (loc.ts && Date.now() - loc.ts > 300000) continue
+        locs.push(loc)
+      } catch {}
+    }
+    res.set('X-Cache', 'REDIS')
     res.json(locs)
   } catch(e) {
-    // Fallback: return empty if bot not running
     res.json([])
   }
 })

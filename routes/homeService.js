@@ -12,7 +12,7 @@ async function nextNumber() {
 }
 
 /* GET */
-router.get('/', async (req,res) => {
+router.get('/', cacheGet(60), async (req,res) => {
   try {
     const q = { deletedAt:{ $exists:false } }
     if (req.query.status) q.status = req.query.status

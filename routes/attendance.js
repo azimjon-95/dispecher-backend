@@ -5,7 +5,7 @@ const { cacheGet, invalidateCache, invalidatePrefix } = require('../redis/cacheM
 const { Attendance, Employee } = require('../models')
 
 /* GET /api/attendance?date=2026-06-01 */
-router.get('/', async (req,res) => {
+router.get('/', cacheGet(30), async (req,res) => {
   try {
     const q = {}
     if (req.query.date)       q.date       = req.query.date

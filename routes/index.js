@@ -74,14 +74,14 @@ pickupR.delete('/:id', tc.remove)
 /* Simple CRUD */
 const employeesR = buildCached(Employee, ['name','phone'], 'employees', 120)
 const driversR   = buildCached(Driver, ['name','phone','plate'], 'drivers', 60)
-const customersR = build(Customer,   ['name','phone','address'])
+const customersR = buildCached(Customer, ['name','phone','address'], 'customers', 120)
 const financeR   = buildCached(Finance, ['description','category'], 'finance', 30)
 const salaryR    = buildCached(Salary, ['employee'], 'salary', 120)
 const settingsR  = buildCached(Settings, ['key'], 'settings', 300)
 
 /* Archive */
 const archiveR = router()
-archiveR.get('/', async (req,res) => {
+archiveR.get('/', cacheGet(120), async (req,res) => {
   try {
     const data = await Order.find({
       status:{ $in:['tugallandi','bekor'] },
@@ -93,7 +93,7 @@ archiveR.get('/', async (req,res) => {
 
 /* Dashboard */
 const dashR = router()
-dashR.get('/stats', async (req, res) => {
+dashR.get('/stats', cacheGet(20), async (req, res) => {
   try {
     const cache = require('../redis/cache')
     const cacheKey = 'dashboard:stats'
