@@ -83,26 +83,19 @@ mongoose.connection.once('open', async () => {
     const { warmup } = require('./redis/cacheMiddleware')
     const models = require('./models')
     warmup(models).catch(() => {})
+
+    // DB dan eski telegram sozlamalarini o'chirish (endi .env dan)
+    const { Settings } = require('./models')
+    await Settings.deleteMany({ key: { $in: ['BOT_TOKEN','BOT_USERNAME','ADMIN_CHAT_ID','WEBAPP_URL','telegram'] } })
+      .catch(() => {})
   } catch {}
 
-  try {
-    const { Settings } = require('./models')
-    const tgKeys = ['BOT_TOKEN','BOT_USERNAME','ADMIN_CHAT_ID','WEBAPP_URL']
-    
-    for (const key of tgKeys) {
-      if (!process.env[key]) continue
-      // Faqat DB da bo'lmasa yozing (DB ustunlik qiladi)
-      const exists = await Settings.findOne({ key })
-      if (!exists || !exists.value) {
-        await Settings.findOneAndUpdate(
-          { key },
-          { $set: { key, value: process.env[key] } },
-          { upsert: true }
-        )
-        console.log(`✅ .env → DB: ${key} saqlandi`)
-      }
-    }
-  } catch(e) { console.error('Settings sync error:', e.message) }
+  // Telegram sozlamalari faqat .env dan — DB ga yozilmaydi
+  if (process.env.BOT_TOKEN) {
+    console.log('✅ Telegram Bot: .env dan BOT_TOKEN topildi')
+  } else {
+    console.warn('⚠️  BOT_TOKEN .env da yo\'q')
+  }
 })
   .then(async () => {
     console.log('✅ MongoDB connected')
