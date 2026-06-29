@@ -7,6 +7,20 @@
 //  Buyurtma qabul (shafyor)
 // =============================================
 require('dotenv').config({ path: require('path').join(__dirname, '../.env') })
+
+// ── VPN Proxy (lokal test uchun, Rossiya/bloklangan tarmoqda) ──
+if (process.env.HTTP_PROXY || process.env.HTTPS_PROXY || process.env.SOCKS_PROXY) {
+  try {
+    require('global-agent/bootstrap')
+    const proxy = process.env.HTTP_PROXY || process.env.HTTPS_PROXY || process.env.SOCKS_PROXY
+    process.env.GLOBAL_AGENT_HTTP_PROXY  = proxy
+    process.env.GLOBAL_AGENT_HTTPS_PROXY = proxy
+    console.log('🔒 VPN Proxy:', proxy)
+  } catch {
+    console.warn('⚠️  global-agent topilmadi: npm install global-agent')
+  }
+}
+
 const TelegramBot = require('node-telegram-bot-api')
 const mongoose    = require('mongoose')
 
