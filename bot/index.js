@@ -561,49 +561,31 @@ bot.on('callback_query', async query => {
   }
 
   // ── Worker: item advance ──
+  // MUHIM: avval bu yerda mantiq botda DUBLIKAT qilingan edi va
+  // syncOrderStats() chaqirilmasdi — natijada Order.total/status
+  // yangilanmasdi, Redis cache eskirib qolardi, CRM real-time
+  // yangilanmasdi. Endi services/orderSync.js dagi BIR XIL funksiya
+  // ishlatiladi — route va bot orasida hech qanday farq yo'q.
   if (action === 'worker_done') {
-    const item = await OrderItem.findById(id)
-    if (!item) return bot.sendMessage(chatId, '⚠️ Topshiriq topilmadi.')
-
-    const worker  = await Employee.findOne({ tgChatId: chatId })
+    const worker = await Employee.findOne({ tgChatId: chatId })
     if (!worker) return
 
-    const NEXT = {
-      qabul:'yuvish', yuvish:'quritish', quritish:'bezak',
-      bezak:'yetkazish', yetkazish:'tugallandi'
+    try {
+      const { advanceOrderItem } = require('../services/orderSync')
+      const { item, nextStage, earned } = await advanceOrderItem(id)
+
+      bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
+        chat_id: chatId, message_id: query.message.message_id,
+      }).catch(() => {})
+
+      bot.sendMessage(chatId,
+        `✅ *${item.name}* — ${nextStage} bosqichga o'tdi!\n` +
+        (earned > 0 ? `💰 Balansingizga *${fc(earned)}* qo'shildi!` : ''),
+        { parse_mode: 'Markdown' }
+      )
+    } catch (e) {
+      bot.sendMessage(chatId, `⚠️ ${e.message || 'Topshiriqni yangilab bo\'lmadi'}`)
     }
-    const EARN = { yuvish:1500, quritish:800, bezak:1000 }
-
-    const myAss = item.assignments?.find?.(
-      a => String(a.workerId)===String(worker._id) && !a.doneAt
-    )
-    if (myAss) {
-      myAss.doneAt = new Date()
-      myAss.earned = EARN[item.stage]
-        ? Math.round((item.sqm||item.qty||1) * EARN[item.stage])
-        : 0
-    }
-
-    const nextStage = NEXT[item.stage] || 'tugallandi'
-    item.stage = nextStage
-
-    // Worker balance
-    if (myAss?.earned > 0) {
-      await Employee.findByIdAndUpdate(worker._id, {
-        $inc: { balance: myAss.earned }
-      })
-    }
-    await item.save()
-
-    bot.editMessageReplyMarkup({ inline_keyboard:[] }, {
-      chat_id: chatId, message_id: query.message.message_id
-    }).catch(()=>{})
-
-    bot.sendMessage(chatId,
-      `✅ *${item.name}* — ${item.stage} bosqichga o'tdi!\n` +
-      (myAss?.earned > 0 ? `💰 Balansingizga *${fc(myAss.earned)}* qo'shildi!` : ''),
-      { parse_mode: 'Markdown' }
-    )
   }
 })
 

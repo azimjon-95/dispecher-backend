@@ -2,6 +2,7 @@
 const router = require('express').Router()
 const cache = require('../redis/cache')
 const { cacheGet, invalidateCache, invalidatePrefix } = require('../redis/cacheMiddleware')
+const { broadcast, withBroadcast } = require('./_broadcast')
 const { HomeService, Employee, Finance, SalaryPayment } = require('../models')
 
 /* auto-number */
@@ -22,7 +23,7 @@ router.get('/', cacheGet(60), async (req,res) => {
 })
 
 /* POST */
-router.post('/', invalidateCache(['home-service', 'dashboard', 'finance']), async (req,res) => {
+router.post('/', invalidateCache(['home-service', 'dashboard', 'finance']), withBroadcast('home-service'), async (req,res) => {
   try {
     const number = await nextNumber()
     const svc    = await HomeService.create({ ...req.body, number })
@@ -31,7 +32,7 @@ router.post('/', invalidateCache(['home-service', 'dashboard', 'finance']), asyn
 })
 
 /* PUT */
-router.put('/:id', invalidateCache(['home-service', 'dashboard', 'finance']), async (req,res) => {
+router.put('/:id', invalidateCache(['home-service', 'dashboard', 'finance']), withBroadcast('home-service'), async (req,res) => {
   try {
     const svc = await HomeService.findByIdAndUpdate(req.params.id, { $set:req.body }, { new:true })
     res.json(svc)
@@ -39,7 +40,7 @@ router.put('/:id', invalidateCache(['home-service', 'dashboard', 'finance']), as
 })
 
 /* DELETE */
-router.delete('/:id', invalidateCache(['home-service', 'dashboard', 'finance']), async (req,res) => {
+router.delete('/:id', invalidateCache(['home-service', 'dashboard', 'finance']), withBroadcast('home-service'), async (req,res) => {
   try {
     await HomeService.findByIdAndUpdate(req.params.id, { deletedAt:new Date() })
     res.json({ ok:true })
@@ -47,7 +48,7 @@ router.delete('/:id', invalidateCache(['home-service', 'dashboard', 'finance']),
 })
 
 /* POST /api/home-service/:id/complete — Xizmat bajarildi, pul olindi */
-router.post('/:id/complete', async (req,res) => {
+router.post('/:id/complete', invalidateCache(['home-service', 'dashboard', 'finance', 'salary-payments']), withBroadcast('home-service'), async (req,res) => {
   try {
     const { totalAmount, paidAmount, description, workers } = req.body
     const svc = await HomeService.findById(req.params.id)

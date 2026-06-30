@@ -2,6 +2,7 @@
 const router = require('express').Router()
 const cache = require('../redis/cache')
 const { cacheGet, invalidateCache, invalidatePrefix } = require('../redis/cacheMiddleware')
+const { broadcast, withBroadcast } = require('./_broadcast')
 const { Attendance, Employee } = require('../models')
 
 /* GET /api/attendance?date=2026-06-01 */
@@ -19,7 +20,7 @@ router.get('/', cacheGet(30), async (req,res) => {
 })
 
 /* POST /api/attendance — qo'lda yoki bot orqali */
-router.post('/', invalidateCache(['attendance', 'dashboard']), async (req,res) => {
+router.post('/', invalidateCache(['attendance', 'dashboard']), withBroadcast('attendance'), async (req,res) => {
   try {
     const { employeeId, date, checkIn, status, tgChatId, note } = req.body
     if (!employeeId || !date) return res.status(400).json({ error:'employeeId va date kerak' })
@@ -35,7 +36,7 @@ router.post('/', invalidateCache(['attendance', 'dashboard']), async (req,res) =
 })
 
 /* PUT checkout */
-router.put('/:id/checkout', async (req,res) => {
+router.put('/:id/checkout', invalidateCache(['attendance', 'dashboard']), withBroadcast('attendance'), async (req,res) => {
   try {
     const rec = await Attendance.findByIdAndUpdate(req.params.id,
       { $set:{ checkOut: new Date().toTimeString().slice(0,5) } }, { new:true })
@@ -44,7 +45,7 @@ router.put('/:id/checkout', async (req,res) => {
 })
 
 /* GET today summary */
-router.get('/today', async (req,res) => {
+router.get('/today', cacheGet(20), async (req,res) => {
   try {
     const today = new Date().toISOString().slice(0,10)
     const records = await Attendance.find({ date:today })

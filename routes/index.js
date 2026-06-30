@@ -7,16 +7,17 @@ const {
 } = require('../models')
 const cache = require('../redis/cache')
 const { cacheGet, invalidateCache, invalidatePrefix } = require('../redis/cacheMiddleware')
+const { broadcast, withBroadcast } = require('./_broadcast')
 
-/* ── Cache-aware CRUD builder ── */
+/* ── Cache-aware CRUD builder — cache + real-time birga ── */
 function buildCached(Model, fields, prefix, ttl) {
   const c = ctrl(Model, fields)
   const r = router()
   r.get('/',       cacheGet(ttl), c.getAll)
   r.get('/:id',    cacheGet(ttl*2), c.getOne)
-  r.post('/',      invalidateCache([prefix,'dashboard']), c.create)
-  r.put('/:id',    invalidateCache([prefix,'dashboard']), c.update)
-  r.delete('/:id', invalidateCache([prefix,'dashboard']), c.remove)
+  r.post('/',      invalidateCache([prefix,'dashboard']), withBroadcast(prefix), c.create)
+  r.put('/:id',    invalidateCache([prefix,'dashboard']), withBroadcast(prefix), c.update)
+  r.delete('/:id', invalidateCache([prefix,'dashboard']), withBroadcast(prefix), c.remove)
   return r
 }
 
@@ -42,34 +43,31 @@ ordersR.post('/', invalidateCache(['orders','dashboard']), async (req, res) => {
     const count  = await Order.countDocuments()
     const number = '#' + String(1000 + count + 1)
     const doc    = await Order.create({ ...req.body, number })
+    broadcast('orders')
     res.status(201).json(doc)
   } catch(e) { res.status(400).json({ error: e.message }) }
 })
-ordersR.put('/:id', invalidateCache(['orders','delivery','pickup','dashboard']), async (req,res,next) => {
-  const orig = oc.update
-  res.on('finish', () => {
-    if (res.statusCode < 300 && global.__io) global.__io.to('admin').emit('data:update', { type:'orders' })
-  })
-  return orig(req,res,next)
-})
-ordersR.delete('/:id', invalidateCache(['orders','dashboard']), oc.remove)
+ordersR.put('/:id', invalidateCache(['orders','delivery','pickup','dashboard']), withBroadcast('orders'), oc.update)
+ordersR.delete('/:id', invalidateCache(['orders','dashboard']), withBroadcast('orders'), oc.remove)
 
-/* Delivery */
+/* Delivery — shafyor "olib ketish" topshiriqlari, real-time + cache */
 const deliveryR = router()
 const tc = ctrl(Task, ['order','customer','address'])
 deliveryR.get('/', cacheGet(20), async (req,res) => { req.query.type='delivery'; return tc.getAll(req,res) })
 deliveryR.get('/:id', tc.getOne)
-deliveryR.post('/', async (req,res) => { req.body.type='delivery'; return tc.create(req,res) })
-deliveryR.put('/:id', tc.update)
-deliveryR.delete('/:id', tc.remove)
+deliveryR.post('/', invalidateCache(['delivery','dashboard']), withBroadcast('delivery'), async (req,res) => { req.body.type='delivery'; return tc.create(req,res) })
+deliveryR.put('/:id', invalidateCache(['delivery','dashboard']), withBroadcast('delivery'), tc.update)
+deliveryR.delete('/:id', invalidateCache(['delivery']), withBroadcast('delivery'), tc.remove)
+
 
 /* Pickup */
+/* Pickup — shafyor "olib kelish" topshiriqlari, real-time + cache */
 const pickupR = router()
 pickupR.get('/', cacheGet(20), async (req,res) => { req.query.type='pickup'; return tc.getAll(req,res) })
 pickupR.get('/:id', tc.getOne)
-pickupR.post('/', async (req,res) => { req.body.type='pickup'; return tc.create(req,res) })
-pickupR.put('/:id', tc.update)
-pickupR.delete('/:id', tc.remove)
+pickupR.post('/', invalidateCache(['pickup','dashboard']), withBroadcast('pickup'), async (req,res) => { req.body.type='pickup'; return tc.create(req,res) })
+pickupR.put('/:id', invalidateCache(['pickup','dashboard']), withBroadcast('pickup'), tc.update)
+pickupR.delete('/:id', invalidateCache(['pickup']), withBroadcast('pickup'), tc.remove)
 
 /* Simple CRUD */
 const employeesR = buildCached(Employee, ['name','phone'], 'employees', 120)

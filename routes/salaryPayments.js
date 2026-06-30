@@ -2,6 +2,7 @@
 const router = require('express').Router()
 const cache = require('../redis/cache')
 const { cacheGet, invalidateCache, invalidatePrefix } = require('../redis/cacheMiddleware')
+const { broadcast, withBroadcast } = require('./_broadcast')
 const { SalaryPayment, Employee } = require('../models')
 
 /* GET */
@@ -17,7 +18,7 @@ router.get('/', cacheGet(60), async (req,res) => {
 })
 
 /* POST — avans, oylik, jarima, bonus */
-router.post('/', invalidateCache(['salary-payments', 'salary', 'dashboard']), async (req,res) => {
+router.post('/', invalidateCache(['salary-payments', 'salary', 'employees', 'dashboard']), withBroadcast('salary-payments'), async (req,res) => {
   try {
     const { employeeId, type, amount, note, date } = req.body
     if (!employeeId || !amount) return res.status(400).json({ error:'employeeId va amount kerak' })
@@ -46,7 +47,7 @@ router.post('/', invalidateCache(['salary-payments', 'salary', 'dashboard']), as
 })
 
 /* GET monthly summary per employee */
-router.get('/summary/:month', async (req,res) => {
+router.get('/summary/:month', cacheGet(60), async (req,res) => {
   try {
     const { month } = req.params  // 2026-06
     const employees = await Employee.find({ status:'active' })
