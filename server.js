@@ -69,7 +69,11 @@ io.on('connection', (socket) => {
 app.set('io', io)
 
 // ── MongoDB ──
-mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/dispecher')
+mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/dispecher', {
+  serverSelectionTimeoutMS: 5000,  // 5s ichida ulanmasa — xato beradi, abadiy kutmaydi
+  socketTimeoutMS: 20000,          // bitta query 20s dan ortiq osilib qolmasin
+  bufferCommands: false,           // ulanish yo'q bo'lsa so'rovlarni navbatga qo'ymaydi — DARHOL xato beradi
+})
 
 mongoose.connection.once('open', async () => {
   console.log('✅ MongoDB connected')
@@ -94,6 +98,22 @@ mongoose.connection.once('open', async () => {
       key: { $in: ['BOT_TOKEN','BOT_USERNAME','ADMIN_CHAT_ID','WEBAPP_URL','telegram'] }
     })
   } catch {}
+
+  // Order raqam counter'ini ishga tushirish — eski buyurtmalar bilan
+  // to'qnashmasligi uchun, mavjud eng katta raqamdan davom ettiradi.
+  // Faqat counter hali yaratilmagan bo'lsa (birinchi marta) ishlaydi.
+  try {
+    const { Order, Counter } = require('./models')
+    const existing = await Counter.findOne({ key: 'order_number' })
+    if (!existing) {
+      const last = await Order.findOne().sort({ createdAt: -1 }).select('number')
+      const lastNum = parseInt(String(last?.number || '').replace('#', '')) || 1000
+      await Counter.create({ key: 'order_number', value: lastNum })
+      console.log(`✅ Order counter ishga tushirildi: ${lastNum} dan boshlab`)
+    }
+  } catch (e) {
+    console.error('Counter init xato:', e.message)
+  }
 })
 
 mongoose.connection.on('error', (e) => {
@@ -160,6 +180,20 @@ app.use((_, res) => res.status(404).json({ error: 'Route topilmadi' }))
 app.use((err, req, res, next) => {
   console.error(err.stack)
   res.status(500).json({ error: err.message })
+})
+
+// ── Process xavfsizligi ──
+// Bu ushlovchilar bo'lmasa: bitta await qilinmagan xato butun
+// serverni o'ldirib qo'yadi — barcha foydalanuvchilar bir lahzada
+// 502/uzilish oladi. Endi xato faqat logga yoziladi, server davom etadi.
+process.on('unhandledRejection', (reason) => {
+  console.error('🔴 Unhandled Rejection:', reason)
+})
+process.on('uncaughtException', (err) => {
+  console.error('🔴 Uncaught Exception:', err.message)
+  console.error(err.stack)
+  // Process'ni o'ldirmaymiz — lekin agar holat jiddiy bo'lsa
+  // PM2 process monitoring orqali xabar olinishi kerak
 })
 
 const PORT = process.env.PORT || 5000

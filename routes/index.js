@@ -1,7 +1,7 @@
 const router = require('express').Router
 const ctrl   = require('../controllers/crudCtrl')
 const {
-  Order, Task,
+  Order, Task, Counter,
   Employee, Driver, Customer,
   Finance, Salary, Settings,
 } = require('../models')
@@ -40,8 +40,16 @@ ordersR.get('/',    cacheGet(30), oc.getAll)
 ordersR.get('/:id', cacheGet(60), oc.getOne)
 ordersR.post('/', invalidateCache(['orders','dashboard']), async (req, res) => {
   try {
-    const count  = await Order.countDocuments()
-    const number = '#' + String(1000 + count + 1)
+    // Atomic increment — ikkita dispatcher bir vaqtda buyurtma
+    // yaratsa ham, har biri KAFOLATLANGAN noyob raqam oladi.
+    // (Avval countDocuments() ishlatilardi — bu race condition
+    // tufayli ikkita buyurtmaga bir xil raqam berib qo'yishi mumkin edi.)
+    const counter = await Counter.findOneAndUpdate(
+      { key: 'order_number' },
+      { $inc: { value: 1 } },
+      { upsert: true, new: true }
+    )
+    const number = '#' + String(counter.value + 1)
     const doc    = await Order.create({ ...req.body, number })
     broadcast('orders')
     res.status(201).json(doc)

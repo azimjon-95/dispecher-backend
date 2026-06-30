@@ -229,6 +229,15 @@ const AuditLogSchema = new Schema({
   by:       String,
 }, { timestamps: true })
 
+/* ── Counter ── (atomic auto-increment uchun, masalan buyurtma raqami)
+   countDocuments() o'rniga ishlatiladi — chunki ikkita so'rov bir
+   vaqtda kelganda countDocuments() bir xil raqamni qaytarib,
+   dublikat buyurtma raqamiga olib kelishi mumkin edi. */
+const CounterSchema = new Schema({
+  key:   { type: String, unique: true, required: true },
+  value: { type: Number, default: 1000 },
+})
+
 module.exports = {
   Order:     model('Order',     OrderSchema),
   OrderItem: model('OrderItem', OrderItemSchema),
@@ -244,4 +253,5 @@ module.exports = {
   SalaryPayment: model('SalaryPayment', SalaryPaymentSchema),
   HomeService: model('HomeService', HomeServiceSchema),
   AuditLog:  model('AuditLog',  AuditLogSchema),
+  Counter:   model('Counter',   CounterSchema),
 }

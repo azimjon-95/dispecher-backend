@@ -150,36 +150,49 @@ async function advanceOrderItem(itemId) {
     throw Object.assign(new Error('Oxirgi bosqichda'), { status: 400 })
   }
 
-  const curAssign = item.assignments.find(a => a.stage === currStage && !a.doneAt)
-  if (curAssign) curAssign.doneAt = new Date()
+  // ATOMIC update: faqat item.stage HALI HAM currStage bo'lsa o'zgartiramiz.
+  // Bu — ishchi tugmani 2 marta tez-tez bossa (Telegram lag yoki double-tap),
+  // faqat BITTASI muvaffaqiyatli bo'ladi, ikkinchisi "allaqachon o'tgan" deb
+  // rad etiladi. Avval oddiy findById→save ishlatilardi — bu race condition
+  // tufayli balansga ikki marta pul qo'shilishi mumkin edi.
+  const updated = await OrderItem.findOneAndUpdate(
+    { _id: itemId, stage: currStage },
+    { $set: { stage: nextStage, 'assignments.$[elem].doneAt': new Date() } },
+    {
+      new: true,
+      arrayFilters: [{ 'elem.stage': currStage, 'elem.doneAt': { $exists: false } }],
+    }
+  )
+  if (!updated) {
+    throw Object.assign(new Error('Bu bosqich allaqachon yangilangan — qayta urinmang'), { status: 409 })
+  }
 
-  item.stage = nextStage
-  await item.save()
+  const curAssign = item.assignments.find(a => a.stage === currStage && !a.doneAt)
 
   let earned = 0
   const rates = EARN_RATES[currStage]
   if (rates && curAssign?.workerId) {
-    earned = item.unit === 'sqm'
-      ? Math.round((item.sqm || 0) * rates.sqm)
-      : Math.round((item.qty || 1) * rates.dona)
+    earned = updated.unit === 'sqm'
+      ? Math.round((updated.sqm || 0) * rates.sqm)
+      : Math.round((updated.qty || 1) * rates.dona)
 
     if (earned > 0) {
       await Employee.findByIdAndUpdate(curAssign.workerId, { $inc: { balance: earned } })
       await Salary.create({
         employee:   curAssign.workerName,
         employeeId: curAssign.workerId,
-        orderId:    item.orderId,
-        orderItem:  item.name,
+        orderId:    updated.orderId,
+        orderItem:  updated.name,
         stage:      currStage,
         amount:     earned,
         date:       new Date().toISOString().slice(0, 10),
-        note:       `${item.name} — ${ETAP_LABEL[currStage]}`,
+        note:       `${updated.name} — ${ETAP_LABEL[currStage]}`,
       }).catch(() => {})
       await invalidatePrefix('employees') // balans o'zgardi
     }
   }
 
-  const orderStatus = await syncOrderStats(item.orderId)
+  const orderStatus = await syncOrderStats(updated.orderId)
 
-  return { item, nextStage, label: ETAP_LABEL[nextStage], earned, orderStatus }
+  return { item: updated, nextStage, label: ETAP_LABEL[nextStage], earned, orderStatus }
 }
