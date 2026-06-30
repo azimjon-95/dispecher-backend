@@ -85,6 +85,45 @@ const financeR   = buildCached(Finance, ['description','category'], 'finance', 3
 const salaryR    = buildCached(Salary, ['employee'], 'salary', 120)
 const settingsR  = buildCached(Settings, ['key'], 'settings', 300)
 
+/* ── Filial (Ximchistka) joylashuvi ──
+   Bitta CRM bir nechta viloyatga o'rnatilishi mumkin — har bir
+   o'rnatishda admin "📍 Joylashuvni saqlash" tugmasini bosib,
+   filial markazini (lat/lon) bir marta belgilaydi. Shafyorlar
+   xaritada shu nuqta atrofida kuzatiladi — Toshkent koordinatasi
+   kod ichida QATTIQ YOZILMAGAN, har bir mijoz o'zinikini saqlaydi.
+
+   MUHIM: bu route'lar buildCached() ichidagi generic GET /:id dan
+   OLDIN qo'shilishi shart, aks holda Express '/company-location'
+   satrini ":id" parametri deb tushunib, har doim Settings.findById
+   ga yuborib yuborardi (404 yoki noto'g'ri natija). Shu sabab
+   .stack ni qo'lda manipulyatsiya qilamiz — eng ishonchli yo'l:
+   alohida sub-router yaratib, asosiy router'dan OLDIN ulaymiz. */
+const companyLocationR = router()
+companyLocationR.get('/', cacheGet(300), async (req, res) => {
+  try {
+    const doc = await Settings.findOne({ key: 'company_location' })
+    res.json(doc?.value || null)
+  } catch(e) { res.status(500).json({ error: e.message }) }
+})
+companyLocationR.put('/', invalidateCache(['settings']), withBroadcast('settings'), async (req, res) => {
+  try {
+    const { lat, lon, address, city } = req.body
+    if (typeof lat !== 'number' || typeof lon !== 'number') {
+      return res.status(400).json({ error: 'lat va lon raqam bo\'lishi shart' })
+    }
+    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+      return res.status(400).json({ error: 'Koordinata diapazondan tashqarida' })
+    }
+    const value = { lat, lon, address: address || '', city: city || '', savedAt: new Date() }
+    await Settings.findOneAndUpdate(
+      { key: 'company_location' },
+      { key: 'company_location', value },
+      { upsert: true }
+    )
+    res.json(value)
+  } catch(e) { res.status(400).json({ error: e.message }) }
+})
+
 /* Archive */
 const archiveR = router()
 archiveR.get('/', cacheGet(120), async (req,res) => {
@@ -149,6 +188,7 @@ module.exports = {
   financeR,
   salaryR,
   settingsR,
+  companyLocationR,
   archiveR,
   dashR,
   botR:        require('./bot'),
