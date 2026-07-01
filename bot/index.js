@@ -629,4 +629,20 @@ async function getAllLiveLocations() {
   } catch { return [] }
 }
 
+// ── Bot xato ushlovchilar ──
+// polling_error bo'lmasa: tarmoq uzilsa bot jimgina to'xtaydi,
+// hech qachon qayta ulanmaydi. Endi xato logga yoziladi va
+// PM2 tomonidan qayta ishga tushiriladi.
+bot.on('polling_error', (err) => {
+  console.error('🔴 Bot polling xato:', err.code, err.message)
+})
+
+bot.on('error', (err) => {
+  console.error('🔴 Bot xato:', err.message)
+})
+
+process.on('unhandledRejection', (reason) => {
+  console.error('🔴 Bot unhandledRejection:', reason)
+})
+
 module.exports = { bot, notifyDriver, notifyWorker, getAllLiveLocations }
