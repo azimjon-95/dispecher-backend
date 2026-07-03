@@ -11,7 +11,6 @@ const {
   helmetConfig, globalLimiter, mongoSanitizeConfig,
   sanitizeBody, extraHeaders, securityLog, ipGuard
 } = require('./middleware/security')
-const morgan    = require('morgan')
 const http      = require('http')
 const { Server } = require('socket.io')
 
@@ -45,10 +44,6 @@ app.use(sanitizeBody)
 app.use(securityLog)
 app.use(ipGuard)
 app.use(express.json())
-// Morgan faqat development da — production da har so'rov logga yozilmaydi
-if (process.env.NODE_ENV !== 'production') {
-  app.use(morgan('dev'))
-}
 
 // ── Socket.IO ──
 global.__io = io
