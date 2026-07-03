@@ -17,7 +17,7 @@ if (process.env.HTTP_PROXY || process.env.HTTPS_PROXY) {
   } catch { console.warn('⚠️  global-agent yo\'q') }
 }
 
-const TelegramBot = require('node-telegram-bot-api')
+const TelegramBot = require('node-telegram-bot-api').default || require('node-telegram-bot-api');
 const mongoose    = require('mongoose')
 
 // ── MongoDB ──
