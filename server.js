@@ -4,6 +4,9 @@ const mongoose  = require('mongoose')
 const cors      = require('cors')
 const auth      = require('./middleware/auth')
 const xssClean  = require('xss-clean')
+// Bot — bitta instance, global.__bot ga saqlanadi
+// services/telegram.js shu orqali bot ga yetadi (require qilmaydi)
+require('./bot')
 const {
   helmetConfig, globalLimiter, mongoSanitizeConfig,
   sanitizeBody, extraHeaders, securityLog, ipGuard
