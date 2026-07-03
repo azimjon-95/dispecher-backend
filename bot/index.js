@@ -76,7 +76,6 @@ async function findUser(chatId) {
 // ════════════════════════════════
 bot.onText(/\/start/, async msg => {
   const chatId = String(msg.chat.id)
-  console.log('START:', chatId)
   try {
     const user = await findUser(chatId)
     if (user) return sendMainMenu(chatId, user)
@@ -99,7 +98,6 @@ bot.onText(/\/start/, async msg => {
 bot.on('message', async msg => {
   const chatId = String(msg.chat.id)
   const text   = (msg.text || '').trim()
-  console.log('MSG:', text || '[location]', 'FROM:', chatId)
 
   if (text.startsWith('/')) return
   if (msg.location) return handleLiveLocation(chatId, msg.location)
