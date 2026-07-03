@@ -4,15 +4,10 @@ require('dotenv').config({ path: require('path').join(__dirname, '../.env') })
 const TelegramBot = require('node-telegram-bot-api').default || require('node-telegram-bot-api')
 const mongoose    = require('mongoose')
 
-// ─── MongoDB (bot alohida process sifatida ishlaganda kerak) ───
-if (mongoose.connection.readyState === 0) {
-  mongoose.connect(process.env.MONGO_URI, {
-    serverSelectionTimeoutMS: 5000,
-    socketTimeoutMS: 20000,
-    bufferCommands: false,
-  })
-    .then(() => console.log('✅ Bot: MongoDB ulandi'))
-    .catch(e => console.error('❌ Bot DB:', e.message))
+const TOKEN = process.env.BOT_TOKEN
+if (!TOKEN) {
+  console.error('❌ BOT_TOKEN topilmadi!')
+  process.exit(1)
 }
 
 const { Driver, Employee, OrderItem, Task, Attendance } = require('../models')
@@ -20,26 +15,34 @@ const { advanceOrderItem, syncOrderStats } = require('../services/orderSync')
 const { broadcast }       = require('../routes/_broadcast')
 const { invalidateCache } = require('../redis/cacheMiddleware')
 
-// ─── Token tekshiruv ───
-const TOKEN = process.env.BOT_TOKEN
-if (!TOKEN) {
-  console.error('❌ BOT_TOKEN topilmadi!')
-  process.exit(1)
-}
-
-// ─── BOT INSTANCE — bitta, faqat shu yerda ───
-const bot = new TelegramBot(TOKEN, {
-  polling: {
-    interval: 300,
-    params: { timeout: 10 },
-  }
-})
-
-// global.__bot — services/telegram.js shu orqali bot ga yetadi
-// require() qilmasdan, circular dependency yo'q
+// ─── BOT — avval yaratiladi, lekin polling MongoDB ulanguncha boshlanmaydi ───
+const bot = new TelegramBot(TOKEN, { polling: false })
 global.__bot = bot
 
-console.log('🚀 Bot ishga tushdi...')
+// ─── MongoDB ulangandan keyin polling boshlanadi ───
+async function startBot() {
+  try {
+    // Agar allaqachon ulangan bo'lsa (server.js orqali kelganda) — kutmaymiz
+    if (mongoose.connection.readyState !== 1) {
+      await mongoose.connect(process.env.MONGO_URI, {
+        serverSelectionTimeoutMS: 5000,
+        socketTimeoutMS: 20000,
+        bufferCommands: false,
+      })
+      console.log('✅ Bot: MongoDB ulandi')
+    }
+
+    // MongoDB tayyor — endi polling boshlaymiz
+    bot.startPolling({ interval: 300, params: { timeout: 10 } })
+    console.log('🚀 Bot ishga tushdi...')
+  } catch (e) {
+    console.error('❌ Bot MongoDB ulanmadi:', e.message)
+    // 5 soniyadan keyin qayta urinish
+    setTimeout(startBot, 5000)
+  }
+}
+
+startBot()
 
 // ─── Helpers ───
 const fc    = n => (n || 0).toLocaleString('ru-RU') + " so'm"
