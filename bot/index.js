@@ -52,6 +52,11 @@ const bot = new TelegramBot(TOKEN, {
   }
 })
 
+// global.__bot — services/telegram.js bot/index.js ni import qilmay
+// shu orqali bot instance ga yetadi. Bu circular dependency va
+// double-polling muammosini hal qiladi.
+global.__bot = bot
+
 console.log('🚀 Bot ishga tushdi...')
 
 // ── Helpers ──
