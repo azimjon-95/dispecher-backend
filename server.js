@@ -79,6 +79,11 @@ mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/dispecher',
 mongoose.connection.once('open', async () => {
   console.log('✅ MongoDB connected')
 
+  // GPS Reminder — ishlayotgan shafyorlar WebApp ni ochmasa SMS yuboradi
+  try {
+    require('./services/gpsReminder').start()
+  } catch (e) { console.error('gpsReminder start xato:', e.message) }
+
   // Cache warmup
   try {
     const { warmup } = require('./redis/cacheMiddleware')

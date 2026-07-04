@@ -231,11 +231,18 @@ async function sendDriverMenu(chatId, driver) {
       status: { $in: ['yangi', 'jarayonda'] },
       deletedAt: { $exists: false },
     })
+
+    const isWorking = driver.isWorking
     safeSend(chatId,
-      `🚗 *${driver.name}*\n\nFaol topshiriqlar: *${tasks} ta*\nVaqt: ${nowT()}`,
+      `🚗 *${driver.name}*\n\n` +
+      `Holat: ${isWorking ? '🟢 Ish vaqti' : '⚫ Dam olmoqda'}\n` +
+      `Faol topshiriqlar: *${tasks} ta*\n` +
+      `Vaqt: ${nowT()}`,
       {
         reply_markup: {
           keyboard: [
+            // Ish holati — asosiy tugma
+            [{ text: isWorking ? '🔴 Ishni tugatish' : '🟢 Ishni boshlash' }],
             [{ text: '📋 Topshiriqlarim' }, { text: '📍 Lokatsiyam' }],
             [{ text: '✅ Topshirildi' },    { text: '📊 Statistika'  }],
             [{ text: '📡 Live GPS yoqish', web_app: { url: WEBAPP_URL } }],
@@ -279,6 +286,70 @@ async function sendWorkerMenu(chatId, worker) {
 async function handleDriverMsg(chatId, text, driver) {
   try {
     switch (text) {
+
+      // ── Ishni boshlash ──
+      case '🟢 Ishni boshlash': {
+        if (driver.isWorking) {
+          return safeSend(chatId, '✅ Siz allaqachon ish vaqtidasiz!')
+        }
+        const WEBAPP_URL = process.env.WEBAPP_URL || 'https://demo.tartibcrm.uz/driver-app'
+        await Driver.findByIdAndUpdate(driver._id, {
+          $set: {
+            isWorking:      true,
+            workStartedAt:  new Date(),
+            status:         'faol',
+            webappOpenedAt: null,
+            webappClosedAt: null,
+            gpsSmsSentAt:   null,
+          }
+        })
+        await invalidateCache(['drivers','dashboard'])
+        broadcast('drivers')
+        await safeSend(chatId,
+          `🟢 *Ish boshlandi!*\n\n` +
+          `Vaqt: *${nowT()}*\n\n` +
+          `GPS kuzatuvni yoqishni unutmang 👇`,
+          {
+            reply_markup: {
+              inline_keyboard: [[
+                { text: '📡 GPS Yoqish', web_app: { url: WEBAPP_URL } },
+              ]],
+            },
+          }
+        )
+        const fresh = await Driver.findById(driver._id).lean()
+        return sendDriverMenu(chatId, fresh)
+      }
+
+      // ── Ishni tugatish ──
+      case '🔴 Ishni tugatish': {
+        if (!driver.isWorking) {
+          return safeSend(chatId, '⚫ Siz hozir ish vaqtida emassiz.')
+        }
+        await Driver.findByIdAndUpdate(driver._id, {
+          $set: {
+            isWorking:     false,
+            workStartedAt: null,
+            status:        'dam',
+          }
+        })
+        await invalidateCache(['drivers','dashboard'])
+        broadcast('drivers')
+
+        // Redis dan GPS o'chirish
+        try {
+          const cache = require('../redis/cache')
+          await cache.del(`driver_loc:${chatId}`)
+        } catch {}
+
+        await safeSend(chatId,
+          `🔴 *Ish tugadi!*\n\n` +
+          `Vaqt: *${nowT()}*\n\n` +
+          `Yaxshi dam oling! 👋`
+        )
+        const fresh = await Driver.findById(driver._id).lean()
+        return sendDriverMenu(chatId, fresh)
+      }
       case '📋 Topshiriqlarim': {
         const tasks = await Task.find({
           $or: [{ driverId: driver._id }, { driver: driver.name }],

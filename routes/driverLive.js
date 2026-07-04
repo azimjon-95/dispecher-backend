@@ -126,4 +126,38 @@ router.post('/offline', async (req, res) => {
   }
 })
 
+/* ─────────────────────────────────────────
+   POST /api/driver/webapp-open
+   WebApp ochilganda chaqiriladi — GPS reminder uchun
+───────────────────────────────────────── */
+router.post('/webapp-open', async (req, res) => {
+  try {
+    const { telegramId } = req.body
+    if (!telegramId) return res.status(400).json({ error: 'telegramId kerak' })
+    const { Driver } = require('../models')
+    await Driver.findOneAndUpdate(
+      { tgChatId: String(telegramId) },
+      { $set: { webappOpenedAt: new Date(), gpsSmsSentAt: null } }
+    )
+    res.json({ ok: true })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+/* ─────────────────────────────────────────
+   POST /api/driver/webapp-close
+   WebApp yopilganda chaqiriladi — GPS reminder uchun
+───────────────────────────────────────── */
+router.post('/webapp-close', async (req, res) => {
+  try {
+    const { telegramId } = req.body
+    if (!telegramId) return res.status(400).json({ error: 'telegramId kerak' })
+    const { Driver } = require('../models')
+    await Driver.findOneAndUpdate(
+      { tgChatId: String(telegramId) },
+      { $set: { webappClosedAt: new Date() } }
+    )
+    res.json({ ok: true })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
 module.exports = router

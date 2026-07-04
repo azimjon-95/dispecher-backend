@@ -97,16 +97,23 @@ const EmployeeSchema = new Schema({
 
 /* ── Driver ── */
 const DriverSchema = new Schema({
-  name:      { type: String, required: true },
-  phone:     { type: String, required: true },
-  pin:       { type: String, index: true },   // Telegram bot kirish PIN kodi
-  tgChatId:  String,
-  car:       String,
-  plate:     String,
-  status:    { type: String, enum: ['faol','band','dam'], default: 'faol' },
-  trips:     { type: Number, default: 0 },
-  balance:   { type: Number, default: 0 },
-  deletedAt: Date,
+  name:          { type: String, required: true },
+  phone:         { type: String, required: true },
+  pin:           { type: String, index: true },
+  tgChatId:      String,
+  car:           String,
+  plate:         String,
+  status:        { type: String, enum: ['faol','band','dam'], default: 'faol' },
+  // Ish holati — botdan boshqariladi
+  isWorking:     { type: Boolean, default: false },   // ish boshladi/tugatdi
+  workStartedAt: Date,                                 // ish boshlagan vaqt
+  // WebApp GPS kuzatuv holati
+  webappOpenedAt:  Date,   // oxirgi marta webapp ochilgan vaqt
+  webappClosedAt:  Date,   // webapp yopilgan vaqt
+  gpsSmsSentAt:    Date,   // oxirgi GPS eslatma SMS yuborilgan vaqt
+  trips:         { type: Number, default: 0 },
+  balance:       { type: Number, default: 0 },
+  deletedAt:     Date,
 }, { timestamps: true })
 
 /* ── Customer ── */
