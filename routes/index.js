@@ -80,6 +80,54 @@ pickupR.delete('/:id', invalidateCache(['pickup']), withBroadcast('pickup'), tc.
 /* Simple CRUD */
 const employeesR = buildCached(Employee, ['name','phone'], 'employees', 120)
 const driversR   = buildCached(Driver, ['name','phone','plate'], 'drivers', 60)
+
+/* ── PIN generatsiya — /:id/generate-pin ──
+   4 xonali noyob PIN yaratadi, DB ga saqlaydi.
+   Ishchi/shafyor bu PIN bilan Telegram botga kiradi.
+   MUHIM: bu route buildCached ichidagi GET /:id dan
+   OLDIN ro'yxatdan o'tishi kerak, aks holda Express
+   'generate-pin' ni ObjectId deb tushunib yuboradi. */
+
+function generatePin() { return String(Math.floor(1000 + Math.random() * 9000)) }
+
+async function ensureUniquePin(Model, excludeId) {
+  let pin, tries = 0
+  do {
+    pin = generatePin()
+    const exists = await Model.findOne({ pin, _id: { $ne: excludeId } })
+    if (!exists) return pin
+    tries++
+  } while (tries < 20)
+  throw new Error('Noyob PIN yaratib bo\'lmadi, qayta urinib ko\'ring')
+}
+
+employeesR.post('/:id/generate-pin', invalidateCache(['employees']), async (req, res) => {
+  try {
+    const pin = await ensureUniquePin(Employee, req.params.id)
+    const emp = await Employee.findByIdAndUpdate(
+      req.params.id,
+      { $set: { pin, tgChatId: '' } },  // yangi PIN bilan eski TG ulanishi qayta tiklanadi
+      { new: true }
+    )
+    if (!emp) return res.status(404).json({ error: 'Ishchi topilmadi' })
+    broadcast('employees')
+    res.json({ pin, name: emp.name, _id: emp._id })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+driversR.post('/:id/generate-pin', invalidateCache(['drivers']), async (req, res) => {
+  try {
+    const pin = await ensureUniquePin(Driver, req.params.id)
+    const drv = await Driver.findByIdAndUpdate(
+      req.params.id,
+      { $set: { pin, tgChatId: '' } },  // yangi PIN bilan eski TG ulanishi qayta tiklanadi
+      { new: true }
+    )
+    if (!drv) return res.status(404).json({ error: 'Shafyor topilmadi' })
+    broadcast('drivers')
+    res.json({ pin, name: drv.name, _id: drv._id })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
 const customersR = buildCached(Customer, ['name','phone','address'], 'customers', 120)
 const financeR   = buildCached(Finance, ['description','category'], 'finance', 30)
 const salaryR    = buildCached(Salary, ['employee'], 'salary', 120)

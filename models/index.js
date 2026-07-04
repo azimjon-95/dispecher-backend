@@ -99,6 +99,7 @@ const EmployeeSchema = new Schema({
 const DriverSchema = new Schema({
   name:      { type: String, required: true },
   phone:     { type: String, required: true },
+  pin:       { type: String, index: true },   // Telegram bot kirish PIN kodi
   tgChatId:  String,
   car:       String,
   plate:     String,
