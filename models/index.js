@@ -110,7 +110,7 @@ const DriverSchema = new Schema({
   // WebApp GPS kuzatuv holati
   webappOpenedAt:  Date,   // oxirgi marta webapp ochilgan vaqt
   webappClosedAt:  Date,   // webapp yopilgan vaqt
-  gpsSmsSentAt:    Date,   // oxirgi GPS eslatma SMS yuborilgan vaqt
+  gpsReminderAt:   Date,   // oxirgi bot eslatma yuborilgan vaqt   // oxirgi GPS eslatma SMS yuborilgan vaqt
   trips:         { type: Number, default: 0 },
   balance:       { type: Number, default: 0 },
   deletedAt:     Date,

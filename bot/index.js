@@ -300,7 +300,7 @@ async function handleDriverMsg(chatId, text, driver) {
             status:         'faol',
             webappOpenedAt: null,
             webappClosedAt: null,
-            gpsSmsSentAt:   null,
+            gpsReminderAt:  null,
           }
         })
         await invalidateCache(['drivers','dashboard'])
