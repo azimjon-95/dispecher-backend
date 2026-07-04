@@ -3,7 +3,7 @@ const ctrl   = require('../controllers/crudCtrl')
 const {
   Order, Task, Counter,
   Employee, Driver, Customer,
-  Finance, Salary, Settings,
+  Finance, Salary, Settings, Price,
 } = require('../models')
 const cache = require('../redis/cache')
 const { cacheGet, invalidateCache, invalidatePrefix } = require('../redis/cacheMiddleware')
@@ -186,6 +186,56 @@ archiveR.get('/', cacheGet(120), async (req,res) => {
 
 /* Dashboard */
 const dashR = router()
+
+/* ── /api/dashboard/bootstrap — BITTA SO'ROV, BARCHA DATA ──
+   Sahifa ochilishi bilan frontend shu endpointni bir marta chaqiradi.
+   Barcha jadvallar, statistika — hammasi bir JSON da keladi.
+   Keyin Socket.IO orqali faqat o'zgargan qismlar push qilinadi.
+   Frontend boshqa alohida so'rov yubormaydi. */
+dashR.get('/bootstrap', cacheGet(20), async (req, res) => {
+  try {
+    const [
+      orders, drivers, employees, customers,
+      delivery, pickup, finance, prices,
+    ] = await Promise.all([
+      Order.find({ deletedAt:{ $exists:false } }).sort({ createdAt:-1 }).limit(100).lean(),
+      Driver.find({ deletedAt:{ $exists:false } }).lean(),
+      Employee.find({ deletedAt:{ $exists:false } }).lean(),
+      Customer.find({ deletedAt:{ $exists:false } }).sort({ createdAt:-1 }).limit(200).lean(),
+      Task.find({ type:'delivery', deletedAt:{ $exists:false } }).sort({ createdAt:-1 }).limit(50).lean(),
+      Task.find({ type:'pickup', deletedAt:{ $exists:false } }).sort({ createdAt:-1 }).limit(50).lean(),
+      Finance.find({ deletedAt:{ $exists:false } }).sort({ createdAt:-1 }).limit(100).lean(),
+      Price.find({ deletedAt:{ $exists:false } }).lean(),
+    ])
+
+    // Dashboard stats (inline — qo'shimcha query yo'q)
+    const activeOrders = orders.filter(o => !['tugallandi','bekor'].includes(o.status)).length
+    const finKirim  = finance.filter(f=>f.type==='kirim').reduce((s,f)=>s+(f.amount||0),0)
+    const finChiqim = finance.filter(f=>f.type==='chiqim').reduce((s,f)=>s+(f.amount||0),0)
+
+    res.json({
+      orders,
+      drivers,
+      employees,
+      customers,
+      delivery,
+      pickup,
+      finance,
+      prices,
+      stats: {
+        totalOrders:    orders.length,
+        activeOrders,
+        totalCustomers: customers.length,
+        activeDrivers:  drivers.filter(d=>d.status==='faol').length,
+        balance:        finKirim - finChiqim,
+        todayRevenue:   finKirim,
+        todayExpense:   finChiqim,
+      },
+      _ts: Date.now(),
+    })
+  } catch(e) { res.status(500).json({ error: e.message }) }
+})
+
 dashR.get('/stats', cacheGet(20), async (req, res) => {
   try {
     const cache = require('../redis/cache')
