@@ -224,6 +224,8 @@ function sendMainMenu(chatId, user) {
 
 async function sendDriverMenu(chatId, driver) {
   try {
+    const WEBAPP_URL = process.env.WEBAPP_URL || 'https://demo.tartibcrm.uz/driver-app'
+
     const tasks = await Task.countDocuments({
       $or: [{ driverId: driver._id }, { driver: driver.name }],
       status: { $in: ['yangi', 'jarayonda'] },
@@ -235,8 +237,8 @@ async function sendDriverMenu(chatId, driver) {
         reply_markup: {
           keyboard: [
             [{ text: '📋 Topshiriqlarim' }, { text: '📍 Lokatsiyam' }],
-            [{ text: '✅ Topshirildi' },    { text: '📊 Statistika' }],
-            [{ text: '📡 Live GPS yoqish', request_location: true }],
+            [{ text: '✅ Topshirildi' },    { text: '📊 Statistika'  }],
+            [{ text: '📡 Live GPS yoqish', web_app: { url: WEBAPP_URL } }],
           ],
           resize_keyboard: true,
         }
@@ -303,22 +305,7 @@ async function handleDriverMsg(chatId, text, driver) {
         }
         break
       }
-      case '📡 Live GPS yoqish': {
-        safeSend(chatId,
-          `📡 *Live GPS — Qanday yoqish kerak:*\n\n` +
-          `1️⃣ Pastdagi 📎 tugmasini bosing\n` +
-          `2️⃣ "Geolokatsiya" ni tanlang\n` +
-          `3️⃣ *"Jonli joylashuvni ulashish"* ni tanlang\n` +
-          `4️⃣ Vaqtni tanlang: *1 soat* yoki *8 soat*\n\n` +
-          `✅ Shundan keyin CRM xaritasida harakatlaringiz real vaqtda ko'rinadi!\n\n` +
-          `⚠️ Oddiy joylashuv emas — *Jonli* joylashuvni tanlang.`,
-          { reply_markup: { keyboard: [
-            [{ text: '📍 Bir martalik joylashuv', request_location: true }],
-            [{ text: '🔙 Menyu' }],
-          ], resize_keyboard: true } }
-        )
-        break
-      }
+
       case '✅ Topshirildi': {
         const tasks = await Task.find({
           $or: [{ driverId: driver._id }, { driver: driver.name }],

@@ -38,6 +38,7 @@ router.post('/live-location', async (req, res) => {
 
     const payload = {
       telegramId:  String(telegramId),
+      driverName:  req.body.driverName || '',
       latitude:    parseFloat(latitude),
       longitude:   parseFloat(longitude),
       speed:       speed    ? parseFloat(speed)    : null,
