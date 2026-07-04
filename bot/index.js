@@ -303,14 +303,22 @@ async function handleDriverMsg(chatId, text, driver) {
         }
         break
       }
-      case '📍 Lokatsiyam':
-        safeSend(chatId, '📡 Lokatsiyangizni yuboring:', {
-          reply_markup: { keyboard: [
-            [{ text: '📍 Yuborish', request_location: true }],
+      case '📡 Live GPS yoqish': {
+        safeSend(chatId,
+          `📡 *Live GPS — Qanday yoqish kerak:*\n\n` +
+          `1️⃣ Pastdagi 📎 tugmasini bosing\n` +
+          `2️⃣ "Geolokatsiya" ni tanlang\n` +
+          `3️⃣ *"Jonli joylashuvni ulashish"* ni tanlang\n` +
+          `4️⃣ Vaqtni tanlang: *1 soat* yoki *8 soat*\n\n` +
+          `✅ Shundan keyin CRM xaritasida harakatlaringiz real vaqtda ko'rinadi!\n\n` +
+          `⚠️ Oddiy joylashuv emas — *Jonli* joylashuvni tanlang.`,
+          { reply_markup: { keyboard: [
+            [{ text: '📍 Bir martalik joylashuv', request_location: true }],
             [{ text: '🔙 Menyu' }],
-          ], resize_keyboard: true }
-        })
+          ], resize_keyboard: true } }
+        )
         break
+      }
       case '✅ Topshirildi': {
         const tasks = await Task.find({
           $or: [{ driverId: driver._id }, { driver: driver.name }],
@@ -495,7 +503,16 @@ async function getAllLiveLocations() {
   } catch { return [] }
 }
 
-// ─── Error handlers ───
+// ── Haqiqiy Live Location yangilanishi ──
+// Telegram shafyor "Jonli joylashuv" yuborganda har daqiqada
+// edited_message eventi keladi — shu orqali real-time GPS ishlaydi
+bot.on('edited_message', async msg => {
+  if (!msg.location) return
+  const chatId = String(msg.chat.id)
+  return handleLiveLocation(chatId, msg.location)
+})
+
+// ── Error handlers ──
 bot.on('polling_error', err => console.error('❌ POLLING ERROR:', err.message))
 bot.on('error',         err => console.error('❌ BOT ERROR:', err.message))
 process.on('unhandledRejection', err => console.error('❌ UNHANDLED:', err))
