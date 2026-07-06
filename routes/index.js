@@ -64,7 +64,30 @@ const tc = ctrl(Task, ['order','customer','address'])
 deliveryR.get('/', cacheGet(20), async (req,res) => { req.query.type='delivery'; return tc.getAll(req,res) })
 deliveryR.get('/:id', tc.getOne)
 deliveryR.post('/', invalidateCache(['delivery','dashboard']), withBroadcast('delivery'), async (req,res) => { req.body.type='delivery'; return tc.create(req,res) })
-deliveryR.put('/:id', invalidateCache(['delivery','dashboard']), withBroadcast('delivery'), tc.update)
+deliveryR.put('/:id', invalidateCache(['delivery','dashboard']), withBroadcast('delivery'), async (req, res) => {
+  try {
+    const task = await Task.findByIdAndUpdate(req.params.id, { $set: req.body }, { new: true })
+    if (!task) return res.status(404).json({ error: 'Topilmadi' })
+    // Shafyor biriktirilganda avtomatik Telegram xabari
+    const driverAssigned = req.body.driverId || req.body.driver
+    if (driverAssigned) {
+      const drv = task.driverId
+        ? await Driver.findById(task.driverId).lean()
+        : await Driver.findOne({ name: task.driver }).lean()
+      if (drv?.tgChatId) {
+        require('../services/telegram').sendDeliveryToDriver(drv.tgChatId, {
+          taskId: task._id.toString(), order: task.order,
+          customer: task.customer, phone: task.phone,
+          address: task.address, lat: task.lat, lon: task.lon,
+          totalPrice: task.totalPrice||0, paid: task.paid||false,
+          amountDue: task.paid ? 0 : (task.totalPrice||0), items: [],
+        }).catch(()=>{})
+        await Task.findByIdAndUpdate(task._id, { tgSent: true })
+      }
+    }
+    res.json(task)
+  } catch(e) { res.status(400).json({ error: e.message }) }
+})
 deliveryR.delete('/:id', invalidateCache(['delivery']), withBroadcast('delivery'), tc.remove)
 
 
@@ -74,7 +97,27 @@ const pickupR = router()
 pickupR.get('/', cacheGet(20), async (req,res) => { req.query.type='pickup'; return tc.getAll(req,res) })
 pickupR.get('/:id', tc.getOne)
 pickupR.post('/', invalidateCache(['pickup','dashboard']), withBroadcast('pickup'), async (req,res) => { req.body.type='pickup'; return tc.create(req,res) })
-pickupR.put('/:id', invalidateCache(['pickup','dashboard']), withBroadcast('pickup'), tc.update)
+pickupR.put('/:id', invalidateCache(['pickup','dashboard']), withBroadcast('pickup'), async (req, res) => {
+  try {
+    const task = await Task.findByIdAndUpdate(req.params.id, { $set: req.body }, { new: true })
+    if (!task) return res.status(404).json({ error: 'Topilmadi' })
+    const driverAssigned = req.body.driverId || req.body.driver
+    if (driverAssigned) {
+      const drv = task.driverId
+        ? await Driver.findById(task.driverId).lean()
+        : await Driver.findOne({ name: task.driver }).lean()
+      if (drv?.tgChatId) {
+        require('../services/telegram').sendPickupToDriver(drv.tgChatId, {
+          taskId: task._id.toString(), order: task.order,
+          customer: task.customer, phone: task.phone,
+          address: task.address, lat: task.lat, lon: task.lon, items: [],
+        }).catch(()=>{})
+        await Task.findByIdAndUpdate(task._id, { tgSent: true })
+      }
+    }
+    res.json(task)
+  } catch(e) { res.status(400).json({ error: e.message }) }
+})
 pickupR.delete('/:id', invalidateCache(['pickup']), withBroadcast('pickup'), tc.remove)
 
 /* Simple CRUD */
