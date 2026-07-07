@@ -55,7 +55,54 @@ ordersR.post('/', invalidateCache(['orders','dashboard']), async (req, res) => {
     res.status(201).json(doc)
   } catch(e) { res.status(400).json({ error: e.message }) }
 })
-ordersR.put('/:id', invalidateCache(['orders','delivery','pickup','dashboard']), withBroadcast('orders'), oc.update)
+ordersR.put('/:id', invalidateCache(['orders','delivery','pickup','dashboard']), withBroadcast('orders'), async (req, res) => {
+  try {
+    const order = await Order.findByIdAndUpdate(req.params.id, { $set: req.body }, { new: true })
+    if (!order) return res.status(404).json({ error: 'Topilmadi' })
+
+    // Shafyor biriktirilganda — pickup task ham yangilanadi va Telegram xabari ketadi
+    const driverChanged = req.body.driver || req.body.driverId
+    if (driverChanged) {
+      const drv = req.body.driverId
+        ? await Driver.findById(req.body.driverId).lean()
+        : await Driver.findOne({ name: req.body.driver }).lean()
+
+      if (drv) {
+        // Pickup task yangilash (agar mavjud bo'lsa)
+        const pickupTask = await Task.findOneAndUpdate(
+          { orderId: order._id, type: 'pickup', deletedAt: { $exists: false } },
+          { $set: { driver: drv.name, driverId: drv._id } },
+          { new: true }
+        )
+
+        // Telegram xabari — pickup task topilsa shu bo'yicha, topilmasa yangi yaratib yuborish
+        if (drv.tgChatId) {
+          const taskToSend = pickupTask || {
+            _id: order._id,
+            order: order.number,
+            customer: order.customer,
+            phone: order.phone,
+            address: order.address,
+            lat: order.lat,
+            lon: order.lon,
+          }
+          require('../services/telegram').sendPickupToDriver(drv.tgChatId, {
+            taskId:   String(taskToSend._id),
+            order:    taskToSend.order || order.number,
+            customer: taskToSend.customer || order.customer,
+            phone:    taskToSend.phone || order.phone,
+            address:  taskToSend.address || order.address,
+            lat:      taskToSend.lat || order.lat,
+            lon:      taskToSend.lon || order.lon,
+            items:    [],
+          }).catch(() => {})
+        }
+      }
+    }
+
+    res.json(order)
+  } catch(e) { res.status(400).json({ error: e.message }) }
+})
 ordersR.delete('/:id', invalidateCache(['orders','dashboard']), withBroadcast('orders'), oc.remove)
 
 /* Delivery — shafyor "olib ketish" topshiriqlari, real-time + cache */
