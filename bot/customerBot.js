@@ -1,20 +1,12 @@
 'use strict'
-// ═══════════════════════════════════════════════════════════
-//  TARTIB CRM — MIJOZ BOTI
-//  Faqat bitta vazifa: mijozdan joylashuv olish
-//
-//  Oqim:
-//    Admin CRM da "📍 Manzil so'rash" bosadi
-//    → t.me/CUSTOMER_BOT?start=cust_loc_ORDERID_CUSTID
-//    Mijoz botni ochadi → /start → "📍 Manzilimni yuborish"
-//    Mijoz bosadi → bot saqlaydi → CRM yangilanadi
-// ═══════════════════════════════════════════════════════════
-
 require('dotenv').config({ path: require('path').join(__dirname, '../.env') })
 
-const TelegramBot = require('node-telegram-bot-api').default
-                 || require('node-telegram-bot-api')
-const mongoose    = require('mongoose')
+const TelegramBot    = require('node-telegram-bot-api').default
+                    || require('node-telegram-bot-api')
+const mongoose       = require('mongoose')
+const { Customer, Order }  = require('../models')
+const { invalidateCache }  = require('../redis/cacheMiddleware')
+const { broadcast }        = require('../routes/_broadcast')
 
 const TOKEN = process.env.CUSTOMER_BOT_TOKEN
 if (!TOKEN) {
@@ -70,10 +62,7 @@ bot.onText(/\/start(.*)/, async msg => {
 
     // Mijozni Telegram ID bilan bog'laymiz
     if (custId) {
-      try {
-        const { Customer } = require('../models')
-        await Customer.findByIdAndUpdate(custId, { tgChatId: chatId })
-      } catch {}
+      await Customer.findByIdAndUpdate(custId, { tgChatId: chatId }).catch(() => {})
     }
 
     return safeSend(chatId,
@@ -111,26 +100,16 @@ bot.on('message', async msg => {
   const { latitude, longitude } = msg.location
 
   try {
-    const { Customer, Order } = require('../models')
-    const { invalidateCache } = require('../redis/cacheMiddleware')
-    const { broadcast } = require('../routes/_broadcast')
-
     // Customer ga saqlash
     if (custId) {
       await Customer.findByIdAndUpdate(custId, {
-        lat: latitude, lon: longitude,
-        locationSaved: true,
+        lat: latitude, lon: longitude, locationSaved: true,
       })
     }
-
     // Order ga ham saqlash
     if (orderId) {
-      await Order.findByIdAndUpdate(orderId, {
-        lat: latitude, lon: longitude,
-      })
+      await Order.findByIdAndUpdate(orderId, { lat: latitude, lon: longitude })
     }
-
-    // Cache tozalash + CRM real-time yangilash
     await invalidateCache(['customers', 'orders', 'dashboard'])
     broadcast('customers')
     broadcast('orders')
