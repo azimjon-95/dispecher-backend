@@ -7,6 +7,12 @@ const xssClean  = require('xss-clean')
 // Bot — bitta instance, global.__bot ga saqlanadi
 // services/telegram.js shu orqali bot ga yetadi (require qilmaydi)
 require('./bot')
+
+// Mijoz boti — alohida token, faqat location olish uchun
+// CUSTOMER_BOT_TOKEN .env da bo'lsa ishga tushadi
+if (process.env.CUSTOMER_BOT_TOKEN) {
+  require('./bot/customerBot')
+}
 const {
   helmetConfig, globalLimiter, mongoSanitizeConfig,
   sanitizeBody, extraHeaders, securityLog, ipGuard
