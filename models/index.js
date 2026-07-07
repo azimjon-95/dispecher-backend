@@ -125,6 +125,9 @@ const CustomerSchema = new Schema({
   totalSpent: { type: Number, default: 0 },
   orders:     { type: Number, default: 0 },
   status:     { type: String, enum: ['active','inactive'], default: 'active' },
+  // Telegram — location so'rash uchun
+  tgChatId:   String,
+  tgPhone:    String,   // Telegram'dan kelgan telefon raqami
   // Geo location — bir marta olinsa qayta so'ralmasin
   lat:        Number,
   lon:        Number,

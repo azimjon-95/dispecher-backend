@@ -103,11 +103,34 @@ function clearMarkup(chatId, messageId) {
 }
 
 // ═══════════════════════════════════════════
-//  /start
+//  /start — oddiy va deep link
+//  Deep link format: /start cust_loc_ORDERID_CUSTID
 // ═══════════════════════════════════════════
-bot.onText(/\/start/, async msg => {
+bot.onText(/\/start(.*)/, async msg => {
   const chatId = String(msg.chat.id)
+  const param  = (msg.text || '').replace('/start', '').trim()
   try {
+    // Deep link: mijoz manzilini so'rash
+    if (param.startsWith('cust_loc_')) {
+      const parts   = param.split('_')  // ['cust','loc','orderId','custId']
+      const orderId = parts[2] || ''
+      const custId  = parts[3] || ''
+      sessions[chatId] = `cust_loc:${orderId}:${custId}`
+      // tgChatId ni mijozga saqlash
+      if (custId) {
+        const { Customer } = require('../models')
+        await Customer.findByIdAndUpdate(custId, { tgChatId: chatId }).catch(() => {})
+      }
+      return safeSend(chatId,
+        `📍 *Joylashuvingizni yuboring*\n\n` +
+        `Gilam olib kelishimiz uchun manzilingiz kerak.\n` +
+        `Pastdagi tugmani bosing 👇`,
+        { reply_markup: { keyboard: [[
+          { text: '📍 Manzilimni yuborish', request_location: true }
+        ]], resize_keyboard: true, one_time_keyboard: true } }
+      )
+    }
+    // Oddiy /start
     const user = await findUser(chatId)
     if (user) return sendMenu(chatId, user)
     sessions[chatId] = 'pin'
@@ -115,13 +138,48 @@ bot.onText(/\/start/, async msg => {
       `👋 *Xush kelibsiz — Tartib CRM*\n\n` +
       `Tizimga kirish uchun *4 xonali PIN kodingizni* yuboring.\n` +
       `📌 PIN kodni admindan oling.`,
-      { reply_markup:{ remove_keyboard:true } }
+      { reply_markup: { remove_keyboard: true } }
     )
   } catch(e) {
     console.error('/start:', e.message)
     safeSend(chatId, "⚠️ Xato. Qayta /start bosing.")
   }
 })
+
+// ═══════════════════════════════════════════
+//  MIJOZ LOCATION — saqlash va CRM ga broadcast
+// ═══════════════════════════════════════════
+async function onCustomerLocation(chatId, location, session) {
+  try {
+    const [, orderId, custId] = session.split(':')
+    const latitude  = location.latitude
+    const longitude = location.longitude
+    const { Customer, Order } = require('../models')
+    // Customer ga saqlash
+    if (custId) {
+      await Customer.findByIdAndUpdate(custId, {
+        lat: latitude, lon: longitude,
+        locationSaved: true, tgChatId: chatId,
+      })
+    }
+    // Order ga ham saqlash
+    if (orderId) {
+      await Order.findByIdAndUpdate(orderId, { lat: latitude, lon: longitude })
+    }
+    await invalidateCache(['customers','orders','dashboard'])
+    broadcast('customers'); broadcast('orders')
+    delete sessions[chatId]
+    await safeSend(chatId,
+      `✅ *Manzilingiz saqlandi!*\n\n` +
+      `📐 ${latitude.toFixed(5)}, ${longitude.toFixed(5)}\n\n` +
+      `Shafyorimiz tez orada siz tomonga yo'l oladi. Rahmat! 🙏`,
+      { reply_markup: { remove_keyboard: true } }
+    )
+  } catch(e) {
+    console.error('onCustomerLocation:', e.message)
+    safeSend(chatId, "⚠️ Manzilni saqlashda xato.")
+  }
+}
 
 // ═══════════════════════════════════════════
 //  MESSAGE
@@ -131,6 +189,12 @@ bot.on('message', async msg => {
   const text   = (msg.text || '').trim()
 
   if (text.startsWith('/')) return
+  
+  // Mijoz location yubordi — sessions da cust_loc bo'lsa saqlash
+  if (msg.location && sessions[chatId]?.startsWith('cust_loc:')) {
+    return onCustomerLocation(chatId, msg.location, sessions[chatId])
+  }
+  
   if (msg.location) return onLiveLocation(chatId, msg.location)
 
   if (sessions[chatId] === 'pin') return onPin(chatId, text)
