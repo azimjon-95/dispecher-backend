@@ -5,7 +5,7 @@ const router  = require('express').Router()
 const tg      = require('../services/telegram')
 const cache   = require('../redis/cache')
 const {
-  Task, Driver, Employee, OrderItem, Order, Finance
+  Task, Driver, Employee, OrderItem, Order, Finance, Customer
 } = require('../models')
 
 const fc = n => (n || 0).toLocaleString('ru-RU') + " so'm"
@@ -233,6 +233,67 @@ router.get('/driver-stats/:id', async (req, res) => {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 router.get('/cache-status', (req, res) => {
   res.json({ cacheType: cache.status() })
+})
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//   POST /api/bot/request-location
+//   Mijozga Telegram orqali manzil so'rash
+//
+//   Mantiq:
+//   1. orderId, phone bo'yicha Customer topiladi
+//   2. tgChatId bor → customerBot to'g'ridan xabar yuboradi
+//   3. tgChatId yo'q → deep link qaytariladi (admin yuboradi)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+router.post('/request-location', async (req, res) => {
+  try {
+    const { orderId, phone, custId } = req.body
+    if (!orderId) return res.status(400).json({ error: 'orderId kerak' })
+
+    const CUSTOMER_BOT = process.env.CUSTOMER_BOT_USERNAME || 'tartibcrm_customer_bot'
+
+    // Mijozni topamiz
+    let customer = null
+    if (custId) customer = await Customer.findById(custId).lean()
+    if (!customer && phone) {
+      const clean = phone.replace(/\D/g, '')
+      customer = await Customer.findOne({
+        phone: { $regex: clean.slice(-9) }
+      }).lean()
+    }
+
+    const cId = customer?._id?.toString() || custId || ''
+    const deepLink = `https://t.me/${CUSTOMER_BOT}?start=cust_loc_${orderId}_${cId}`
+
+    // Telegram'da ro'yxatdan o'tgan bo'lsa — to'g'ridan xabar
+    if (customer?.tgChatId && process.env.CUSTOMER_BOT_TOKEN) {
+      try {
+        const { sendLocationRequest } = require('../bot/customerBot')
+        const sent = await sendLocationRequest(customer.tgChatId, orderId, cId)
+        if (sent) {
+          return res.json({
+            sent:     true,
+            method:   'telegram',
+            tgChatId: customer.tgChatId,
+            name:     customer.name,
+            deepLink,
+          })
+        }
+      } catch {}
+    }
+
+    // Telegram yo'q — deep link qaytaramiz (admin o'zi yubboradi)
+    res.json({
+      sent:     false,
+      method:   'link',
+      deepLink,
+      name:     customer?.name || '',
+      phone:    customer?.phone || phone || '',
+      hasTg:    !!customer?.tgChatId,
+    })
+
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
 })
 
 module.exports = router

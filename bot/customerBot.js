@@ -134,4 +134,29 @@ bot.on('message', async msg => {
 bot.on('polling_error', err => console.error('[CustomerBot] POLLING ERROR:', err.message))
 bot.on('error',         err => console.error('[CustomerBot] BOT ERROR:', err.message))
 
-module.exports = { bot }
+// ── Tashqaridan chaqirish uchun: mijozga location so'rash xabari
+async function sendLocationRequest(tgChatId, orderId, custId) {
+  if (!bot || !tgChatId) return false
+  try {
+    await safeSend(tgChatId,
+      `📍 *Tartib CRM — Gilam yuvish*\n\n` +
+      `Shafyorimiz gilam(lar)ingizni olib ketishi uchun\n` +
+      `*manzilingizni* yuborishingiz kerak.\n\n` +
+      `Pastdagi tugmani bosing 👇`,
+      {
+        reply_markup: {
+          keyboard: [[{ text: '📍 Manzilimni yuborish', request_location: true }]],
+          resize_keyboard: true,
+          one_time_keyboard: true,
+        }
+      }
+    )
+    sessions[tgChatId] = `${orderId}:${custId}`
+    return true
+  } catch (e) {
+    console.error('[CustomerBot] sendLocationRequest:', e.message)
+    return false
+  }
+}
+
+module.exports = { bot, sendLocationRequest }
