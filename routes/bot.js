@@ -253,15 +253,21 @@ router.post('/request-location', async (req, res) => {
 
     // Mijozni topamiz
     let customer = null
-    if (custId) customer = await Customer.findById(custId).lean()
+    if (custId && custId.length === 24) customer = await Customer.findById(custId).lean()
     if (!customer && phone) {
       const clean = phone.replace(/\D/g, '')
+      // Telefon raqam formatlarini keng qidirish
       customer = await Customer.findOne({
-        phone: { $regex: clean.slice(-9) }
+        $or: [
+          { phone: phone },
+          { phone: clean },
+          { phone: { $regex: clean.slice(-9) } },
+          { phone: '+' + clean },
+        ]
       }).lean()
     }
 
-    const cId = customer?._id?.toString() || custId || ''
+    const cId      = customer?._id?.toString() || custId || ''
     const deepLink = `https://t.me/${CUSTOMER_BOT}?start=cust_loc_${orderId}_${cId}`
 
     // Telegram'da ro'yxatdan o'tgan bo'lsa — to'g'ridan xabar
@@ -275,18 +281,19 @@ router.post('/request-location', async (req, res) => {
             method:   'telegram',
             tgChatId: customer.tgChatId,
             name:     customer.name,
+            phone:    customer.phone,
             deepLink,
           })
         }
       } catch {}
     }
 
-    // Telegram yo'q — deep link qaytaramiz (admin o'zi yubboradi)
+    // Telegram yo'q yoki topilmadi — deep link qaytaramiz
     res.json({
       sent:     false,
       method:   'link',
-      deepLink,
-      name:     customer?.name || '',
+      deepLink,                                    // har doim to'liq link
+      name:     customer?.name  || '',
       phone:    customer?.phone || phone || '',
       hasTg:    !!customer?.tgChatId,
     })
