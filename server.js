@@ -138,6 +138,20 @@ setTimeout(() => console.log(`📦 Cache: ${cache.status()}`), 2000)
 
 // ── Routes ──
 app.use('/api/auth',              R.authR)
+
+// ── Internal broadcast — bot process'dan Socket.IO emit uchun
+// Faqat localhost'dan qabul qilinadi
+app.post('/api/internal/broadcast', (req, res) => {
+  const key = req.headers['x-internal-key']
+  if (key !== (process.env.INTERNAL_KEY || 'tartib_internal')) {
+    return res.status(403).json({ error: 'Forbidden' })
+  }
+  const { type, ...extra } = req.body || {}
+  if (type && global.__io) {
+    global.__io.to('admin').emit('data:update', { type, ...extra })
+  }
+  res.json({ ok: true })
+})
 app.use('/api/orders',            auth, R.ordersR)
 app.use('/api/order-items',       R.orderItemsR)
 app.use('/api/prices',            R.pricesR)
