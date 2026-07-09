@@ -31,7 +31,7 @@ const TelegramBot = require('node-telegram-bot-api').default
 const mongoose    = require('mongoose')
 const cache       = require('../redis/cache')
 
-const { Driver, Employee, OrderItem, Task, Attendance } = require('../models')
+const { Driver, Employee, Order, OrderItem, Task, Attendance } = require('../models')
 const { advanceOrderItem, syncOrderStats } = require('../services/orderSync')
 const { broadcast }       = require('../routes/_broadcast')
 const { invalidateCache } = require('../redis/cacheMiddleware')
@@ -227,8 +227,28 @@ bot.on('callback_query', async q => {
 
       case 'pickup_reject':
       case 'delivery_reject': {
+        try {
+          // Task'ni yangi holatga qaytarish, shafyorni tozalash
+          const task = await Task.findByIdAndUpdate(id,
+            { $set: { status: 'yangi', driver: '', driverId: null, tgSent: false } },
+            { new: true }
+          )
+          // Order da ham driver tozalansin
+          if (task?.orderId) {
+            await Order.findByIdAndUpdate(task.orderId,
+              { $set: { driver: '', driverId: null } }
+            )
+          }
+          await invalidateCache(['delivery', 'pickup', 'orders', 'dashboard'])
+          broadcast(action.includes('pickup') ? 'pickup' : 'delivery')
+          broadcast('orders')
+        } catch(err) {
+          console.error('reject update:', err.message)
+        }
         clearMarkup(chatId, msgId)
-        safeSend(chatId, '❌ Topshiriq rad etildi.')
+        safeSend(chatId,
+          '❌ *Topshiriq rad etildi.*\n\n' +
+          'Admin boshqa shafyor tayinlaydi.')
         break
       }
     }
