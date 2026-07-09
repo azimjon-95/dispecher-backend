@@ -68,32 +68,45 @@ ordersR.put('/:id', invalidateCache(['orders','delivery','pickup','dashboard']),
         : await Driver.findOne({ name: req.body.driver }).lean()
 
       if (drv) {
-        // Pickup task yangilash (agar mavjud bo'lsa)
-        const pickupTask = await Task.findOneAndUpdate(
-          { orderId: order._id, type: 'pickup', deletedAt: { $exists: false } },
-          { $set: { driver: drv.name, driverId: drv._id } },
-          { new: true }
+        // Pickup task topish yoki YARATISH — callback_data'da doim Task._id bo'lishi kerak
+        let pickupTask = await Task.findOne(
+          { orderId: order._id, type: 'pickup', deletedAt: { $exists: false } }
         )
 
-        // Telegram xabari — pickup task topilsa shu bo'yicha, topilmasa yangi yaratib yuborish
+        if (pickupTask) {
+          // Mavjud task'ni yangilash
+          await Task.findByIdAndUpdate(pickupTask._id,
+            { $set: { driver: drv.name, driverId: drv._id } }
+          )
+          pickupTask = { ...pickupTask.toObject?.() || pickupTask, driver: drv.name, driverId: drv._id }
+        } else {
+          // Task yo'q — yangi yaratish
+          pickupTask = await Task.create({
+            orderId:   order._id,
+            order:     order.number,
+            type:      'pickup',
+            status:    'yangi',
+            customer:  order.customer,
+            phone:     order.phone,
+            address:   order.address,
+            lat:       order.lat,
+            lon:       order.lon,
+            driver:    drv.name,
+            driverId:  drv._id,
+            auto:      true,
+          })
+        }
+
+        // Telegram xabari — doim Task._id ishlatiladi
         if (drv.tgChatId) {
-          const taskToSend = pickupTask || {
-            _id: order._id,
-            order: order.number,
-            customer: order.customer,
-            phone: order.phone,
-            address: order.address,
-            lat: order.lat,
-            lon: order.lon,
-          }
           require('../services/telegram').sendPickupToDriver(drv.tgChatId, {
-            taskId:   String(taskToSend._id),
-            order:    taskToSend.order || order.number,
-            customer: taskToSend.customer || order.customer,
-            phone:    taskToSend.phone || order.phone,
-            address:  taskToSend.address || order.address,
-            lat:      taskToSend.lat || order.lat,
-            lon:      taskToSend.lon || order.lon,
+            taskId:   String(pickupTask._id),
+            order:    order.number,
+            customer: order.customer,
+            phone:    order.phone,
+            address:  order.address,
+            lat:      order.lat,
+            lon:      order.lon,
             items:    [],
           }).catch(() => {})
         }
